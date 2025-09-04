@@ -1,40 +1,8 @@
 # RAFT Cluster Virtual Network Setup
 
-This script provides a complete solution for setting up isolated virtual network environments for NSO RAFT cluster testing. It creates network namespaces, c# Custom RAFT cluster configuration
-nodes=5
-cluster_name=my-production-cluster
-prefix=prod
-network_prefix=10.0
-bridge_name=prod-cluster
+This script provides a complete solution for setting up isolated virtual network environments for NSO RAFT cluster testing. It creates network namespaces, configures virtual networking, and sets up NSO instances for realistic cluster testing scenarios.
 
-# NSO settings
-ssl_enabled=true
-ssl_cert_dir=/path/to/certificates
-ncs_flags=-v --debug
-env_sh_path=/opt/ncs/current/ncsrc
-
-# Operational settings
-timeout=60g, and sets up NSO instances for realistic cluster testing scena### NSO Integration
-
-### RAFT Configuration
-
-The script automatically configures NSO with:
-
-- **Cluster Identity**: Unique cluster name and node addresses using proper hostnames
-- **Seed Nodes**: Circular seed node configuration for bootstrapping (each node points to the next)
-- **Network Binding**: Node-specific IP addresses matching the network namespaces
-- **Hostname Resolution**: Proper hostname mapping that matches the /etc/hosts entries
-- **SSL Configuration**: Optional SSL/TLS for secure communication
-
-**Node Address Format**: The script uses hostnames that match the network setup:
-- Node 1: `ncsd1@ha1.ha-cluster` (resolves to `192.168.1.1`)
-- Node 2: `ncsd2@ha2.ha-cluster` (resolves to `192.168.2.1`)  
-- Node 3: `ncsd3@ha3.ha-cluster` (resolves to `192.168.3.1`)
-
-**Seed Node Configuration**: Circular dependency for cluster bootstrapping:
-- Node 1 → seeds from Node 2 (`ncsd2@ha2.ha-cluster`)
-- Node 2 → seeds from Node 3 (`ncsd3@ha3.ha-cluster`)
-- Node 3 → seeds from Node 1 (`ncsd1@ha1.ha-cluster`)Overview
+## Overview
 
 The `raft-cluster-netns.sh` script automates the creation of:
 
