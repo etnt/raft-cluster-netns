@@ -42,6 +42,11 @@ HOST="localhost.localdomain"
 CONFIG_FILE=""
 ENV_SH_PATH=""
 
+# Configure command options
+AUTO_GENERATE=false
+CONFIG_OUTPUT=""
+CONFIG_TYPE="simple"
+
 # Colors for output
 RED='\033[0;31m'
 GREEN='\033[0;32m'
@@ -82,6 +87,27 @@ execute_cmd() {
         eval "$cmd"
     else
         eval "$cmd" >/dev/null 2>&1
+    fi
+}
+
+# Validation functions  
+validate_parameters() {
+    # Validate prefix for security (no path traversal)
+    if [[ "$PREFIX" =~ \.\.|/ ]]; then
+        log_error "Invalid prefix: $PREFIX (cannot contain '..' or '/')"
+        exit 1
+    fi
+    
+    # Validate prefix characters (alphanumeric and basic symbols only)
+    if ! [[ "$PREFIX" =~ ^[a-zA-Z0-9_-]+$ ]]; then
+        log_error "Invalid prefix: $PREFIX (only alphanumeric, underscore, and hyphen allowed)"
+        exit 1
+    fi
+    
+    # Validate number of nodes if specified
+    if [[ -n "$NODES" ]] && (! [[ "$NODES" =~ ^[0-9]+$ ]] || [[ "$NODES" -lt 1 ]]); then
+        log_error "Invalid number of nodes: $NODES"
+        exit 1
     fi
 }
 
@@ -1281,6 +1307,7 @@ COMMANDS:
     isolate <node_id>       Isolate single node (simulate cable disconnect)
     partition <nodes>       Create network partition between groups (e.g., "1,2")
     heal [node_id]          Heal network partition (all nodes or specific node)
+    configure               Create/generate configuration files
     help                    Show this help message
 
 GLOBAL OPTIONS:
@@ -1342,6 +1369,19 @@ EXAMPLES:
 
     # Complete cleanup
     $SCRIPT_NAME cleanup --force
+
+    # Generate configuration files
+    $SCRIPT_NAME configure --auto                          # Auto-generate simple config
+    $SCRIPT_NAME configure --auto --type l3bgp             # Auto-generate L3 BGP config
+    $SCRIPT_NAME configure --auto --nodes 5 --output my.conf
+    $SCRIPT_NAME configure                                  # Interactive wizard
+
+CONFIGURE OPTIONS:
+    --auto                  Auto-generate configuration (no prompts)
+    --type <type>           Configuration type: simple, l3bgp (default: simple)
+    --output <file>         Output configuration file (default: .raft-cluster.conf)
+    --nodes <count>         Number of nodes for auto-generation
+    --force                 Overwrite existing configuration file
 
 CONFIGURATION FILE:
     Create a .raft-cluster.conf file to store default settings:
@@ -1460,6 +1500,20 @@ parse_args() {
                 FORCE=true
                 shift
                 ;;
+            --auto)
+                AUTO_GENERATE=true
+                shift
+                ;;
+            --output)
+                shift
+                CONFIG_OUTPUT="$1"
+                shift
+                ;;
+            --type)
+                shift
+                CONFIG_TYPE="$1"
+                shift
+                ;;
             -h|--help)
                 show_usage
                 exit 0
@@ -1502,6 +1556,18 @@ parse_args() {
     # Validate arguments
     if ! [[ "$NODES" =~ ^[0-9]+$ ]] || [[ "$NODES" -lt 1 ]]; then
         log_error "Invalid number of nodes: $NODES"
+        exit 1
+    fi
+    
+    # Validate prefix for security (no path traversal)
+    if [[ "$PREFIX" =~ \.\.|/ ]]; then
+        log_error "Invalid prefix: $PREFIX (cannot contain '..' or '/')"
+        exit 1
+    fi
+    
+    # Validate prefix characters (alphanumeric and basic symbols only)
+    if ! [[ "$PREFIX" =~ ^[a-zA-Z0-9_-]+$ ]]; then
+        log_error "Invalid prefix: $PREFIX (only alphanumeric, underscore, and hyphen allowed)"
         exit 1
     fi
     
@@ -1562,6 +1628,9 @@ parse_args() {
             ;;
         heal)
             heal_partition "$SPECIFIC_NODE"
+            ;;
+        configure)
+            run_configure_wizard
             ;;
         help)
             show_usage
@@ -1665,6 +1734,398 @@ exec_in_namespace() {
         export NCS_IPC_ADDR=${NETWORK_PREFIX}.${node_id}.1
         $cmd
     "
+}
+
+# =============================================================================
+# Configuration Generator Functions
+# =============================================================================
+
+# Default node names for auto-generation
+DEFAULT_NODE_NAMES=("berlin" "london" "paris" "tokyo" "sydney" "newyork" "mumbai" "dublin" "singapore" "toronto")
+
+# Default ASN base (will increment from here)
+DEFAULT_ASN_BASE=64510
+
+# Generate auto configuration
+generate_auto_config() {
+    local num_nodes="$1"
+    local config_type="$2"
+    local output_file="$3"
+    
+    log_info "Generating auto configuration for $num_nodes nodes (type: $config_type)"
+    
+    case "$config_type" in
+        "simple")
+            generate_simple_config "$num_nodes" "$output_file"
+            ;;
+        "l3bgp")
+            generate_l3bgp_config "$num_nodes" "$output_file"
+            ;;
+        *)
+            log_error "Unknown configuration type: $config_type"
+            return 1
+            ;;
+    esac
+}
+
+# Generate simple configuration
+generate_simple_config() {
+    local num_nodes="$1"
+    local output_file="$2"
+    
+    cat > "$output_file" << EOF
+# RAFT Cluster Configuration - Simple Mode
+# Generated automatically on $(date)
+
+# Cluster settings
+nodes=$num_nodes
+cluster_name=auto-cluster
+prefix=ha
+work_dir=$(pwd)
+
+# Network settings (simple mode)
+network_prefix=192.168
+bridge_name=ha-cluster
+
+# NSO settings
+ssl_enabled=false
+ssl_cert_dir=
+ncs_flags=
+host=localhost.localdomain
+env_sh_path=$(pwd)/env.sh
+
+# Timeouts
+timeout=30
+EOF
+    
+    log_info "Generated simple configuration: $output_file"
+}
+
+# Generate L3 BGP configuration
+generate_l3bgp_config() {
+    local num_nodes="$1"
+    local output_file="$2"
+    
+    cat > "$output_file" << EOF
+# RAFT Cluster Configuration - Layer 3 BGP Topology
+# Generated automatically on $(date)
+
+# Basic cluster settings
+nodes=$num_nodes
+cluster_name=bgp-cluster
+prefix=l3bgp
+work_dir=$(pwd)
+
+# Network topology type
+network_type=l3bgp
+
+# Manager node configuration
+manager_enabled=true
+manager_name=manager
+manager_ip=172.17.0.2
+manager_subnet=172.17.0.0/16
+manager_asn=64500
+manager_bridge=docker0
+
+# BGP configuration
+bgp_enabled=true
+bgp_router_id_base=1.1.1
+
+EOF
+
+    # Generate node-specific configurations
+    for ((i=1; i<=num_nodes; i++)); do
+        local node_name="${DEFAULT_NODE_NAMES[$((i-1))]}"
+        local node_asn=$((DEFAULT_ASN_BASE + i))
+        local subnet_third=$((30 + i - 1))
+        local host_last=$((96 + i))
+        
+        cat >> "$output_file" << EOF
+# Node $i - ${node_name^}
+node_${i}_name=$node_name
+node_${i}_ip=192.168.$subnet_third.$host_last
+node_${i}_subnet=192.168.$subnet_third.0/24
+node_${i}_asn=$node_asn
+node_${i}_hostname=$node_name.cluster.local
+
+EOF
+    done
+    
+    cat >> "$output_file" << EOF
+# Inter-node connectivity
+connect_manager_berlin=direct
+connect_manager_london=direct
+connect_manager_paris=direct
+EOF
+
+    # Add BGP peering connections
+    for ((i=1; i<=num_nodes; i++)); do
+        for ((j=i+1; j<=num_nodes; j++)); do
+            local name1="${DEFAULT_NODE_NAMES[$((i-1))]}"
+            local name2="${DEFAULT_NODE_NAMES[$((j-1))]}"
+            echo "connect_${name1}_${name2}=bgp_peering" >> "$output_file"
+        done
+    done
+    
+    cat >> "$output_file" << EOF
+
+# NSO settings
+ssl_enabled=false
+ssl_cert_dir=
+ncs_flags=
+host=localhost.localdomain
+env_sh_path=$(pwd)/env.sh
+
+# Timeouts
+timeout=30
+EOF
+    
+    log_info "Generated L3 BGP configuration: $output_file"
+}
+
+# Interactive configuration wizard
+run_configure_wizard() {
+    echo ""
+    echo -e "${GREEN}=== RAFT Cluster Configuration Wizard ===${NC}"
+    echo ""
+    
+    # Determine output file
+    local output_file="${CONFIG_OUTPUT}"
+    if [[ -z "$output_file" ]]; then
+        read -p "Configuration file name [.raft-cluster.conf]: " output_file
+        output_file="${output_file:-.raft-cluster.conf}"
+    fi
+    
+    # Check if file exists
+    if [[ -f "$output_file" ]] && [[ "$FORCE" != "true" ]]; then
+        echo -e "${YELLOW}Warning: File $output_file already exists${NC}"
+        read -p "Overwrite? (y/N): " confirm
+        if [[ "$confirm" != "y" && "$confirm" != "Y" ]]; then
+            log_info "Configuration cancelled"
+            return 0
+        fi
+    fi
+    
+    if [[ "$AUTO_GENERATE" == "true" ]]; then
+        # Auto-generation mode
+        local num_nodes="${NODES:-3}"
+        if [[ -z "$NODES" ]]; then
+            read -p "Number of nodes [3]: " num_nodes
+            num_nodes="${num_nodes:-3}"
+        fi
+        
+        echo "Configuration type options:"
+        echo "  simple - Traditional flat network (current default)"
+        echo "  l3bgp  - Layer 3 BGP with custom subnets and ASNs"
+        echo ""
+        local config_type="$CONFIG_TYPE"
+        if [[ "$config_type" == "simple" ]]; then
+            read -p "Configuration type [simple]: " config_type
+            config_type="${config_type:-simple}"
+        fi
+        
+        generate_auto_config "$num_nodes" "$config_type" "$output_file"
+        
+    else
+        # Interactive mode
+        run_interactive_config "$output_file"
+    fi
+    
+    echo ""
+    echo -e "${GREEN}Configuration created: $output_file${NC}"
+    echo ""
+    echo "Next steps:"
+    echo "  1. Review and customize the configuration if needed"
+    echo "  2. Run: $(basename "$0") setup -c $output_file"
+    echo ""
+}
+
+# Interactive configuration
+run_interactive_config() {
+    local output_file="$1"
+    
+    echo "Let's create your RAFT cluster configuration..."
+    echo ""
+    
+    # Basic settings
+    read -p "Number of nodes [3]: " num_nodes
+    num_nodes="${num_nodes:-3}"
+    
+    read -p "Cluster name [raft-cluster]: " cluster_name
+    cluster_name="${cluster_name:-raft-cluster}"
+    
+    read -p "Namespace prefix [ha]: " prefix
+    prefix="${prefix:-ha}"
+    
+    echo ""
+    echo "Configuration type options:"
+    echo "  1) simple - Traditional flat network"
+    echo "  2) l3bgp  - Layer 3 BGP with custom topologies"
+    echo ""
+    read -p "Choose configuration type [1]: " type_choice
+    type_choice="${type_choice:-1}"
+    
+    local config_type="simple"
+    if [[ "$type_choice" == "2" ]]; then
+        config_type="l3bgp"
+    fi
+    
+    if [[ "$config_type" == "simple" ]]; then
+        create_interactive_simple_config "$output_file" "$num_nodes" "$cluster_name" "$prefix"
+    else
+        create_interactive_l3bgp_config "$output_file" "$num_nodes" "$cluster_name" "$prefix"
+    fi
+}
+
+# Create interactive simple config
+create_interactive_simple_config() {
+    local output_file="$1"
+    local num_nodes="$2"
+    local cluster_name="$3"
+    local prefix="$4"
+    
+    read -p "Network prefix [192.168]: " network_prefix
+    network_prefix="${network_prefix:-192.168}"
+    
+    read -p "Bridge name [${prefix}-cluster]: " bridge_name
+    bridge_name="${bridge_name:-${prefix}-cluster}"
+    
+    cat > "$output_file" << EOF
+# RAFT Cluster Configuration - Simple Mode
+# Created interactively on $(date)
+
+# Cluster settings
+nodes=$num_nodes
+cluster_name=$cluster_name
+prefix=$prefix
+work_dir=$(pwd)
+
+# Network settings
+network_prefix=$network_prefix
+bridge_name=$bridge_name
+
+# NSO settings
+ssl_enabled=false
+ssl_cert_dir=
+ncs_flags=
+host=localhost.localdomain
+env_sh_path=$(pwd)/env.sh
+
+# Timeouts
+timeout=30
+EOF
+}
+
+# Create interactive L3 BGP config
+create_interactive_l3bgp_config() {
+    local output_file="$1"
+    local num_nodes="$2"
+    local cluster_name="$3"
+    local prefix="$4"
+    
+    echo ""
+    echo "=== Layer 3 BGP Configuration ==="
+    echo ""
+    
+    read -p "Enable manager node for route reflection? [Y/n]: " enable_manager
+    enable_manager="${enable_manager:-Y}"
+    
+    local manager_enabled="false"
+    if [[ "$enable_manager" == "Y" || "$enable_manager" == "y" ]]; then
+        manager_enabled="true"
+    fi
+    
+    # Start with basic L3BGP template
+    cat > "$output_file" << EOF
+# RAFT Cluster Configuration - Layer 3 BGP Topology
+# Created interactively on $(date)
+
+# Basic cluster settings
+nodes=$num_nodes
+cluster_name=$cluster_name
+prefix=$prefix
+work_dir=$(pwd)
+
+# Network topology type
+network_type=l3bgp
+
+# Manager node configuration
+manager_enabled=$manager_enabled
+EOF
+
+    if [[ "$manager_enabled" == "true" ]]; then
+        read -p "Manager IP [172.17.0.2]: " manager_ip
+        manager_ip="${manager_ip:-172.17.0.2}"
+        
+        read -p "Manager ASN [64500]: " manager_asn
+        manager_asn="${manager_asn:-64500}"
+        
+        cat >> "$output_file" << EOF
+manager_name=manager
+manager_ip=$manager_ip
+manager_subnet=172.17.0.0/16
+manager_asn=$manager_asn
+manager_bridge=docker0
+
+EOF
+    fi
+    
+    cat >> "$output_file" << EOF
+# BGP configuration
+bgp_enabled=true
+bgp_router_id_base=1.1.1
+
+EOF
+    
+    # Configure each node
+    echo ""
+    echo "Now let's configure each node..."
+    for ((i=1; i<=num_nodes; i++)); do
+        echo ""
+        echo "--- Node $i ---"
+        
+        local default_name="${DEFAULT_NODE_NAMES[$((i-1))]}"
+        read -p "Node $i name [$default_name]: " node_name
+        node_name="${node_name:-$default_name}"
+        
+        local default_asn=$((DEFAULT_ASN_BASE + i))
+        read -p "Node $i ASN [$default_asn]: " node_asn
+        node_asn="${node_asn:-$default_asn}"
+        
+        local default_subnet=$((30 + i - 1))
+        local default_ip=$((96 + i))
+        read -p "Node $i subnet [192.168.$default_subnet.0/24]: " node_subnet
+        node_subnet="${node_subnet:-192.168.$default_subnet.0/24}"
+        
+        read -p "Node $i IP [192.168.$default_subnet.$default_ip]: " node_ip
+        node_ip="${node_ip:-192.168.$default_subnet.$default_ip}"
+        
+        cat >> "$output_file" << EOF
+# Node $i - ${node_name^}
+node_${i}_name=$node_name
+node_${i}_ip=$node_ip
+node_${i}_subnet=$node_subnet
+node_${i}_asn=$node_asn
+node_${i}_hostname=$node_name.cluster.local
+
+EOF
+    done
+    
+    # Add remaining config
+    cat >> "$output_file" << EOF
+# NSO settings
+ssl_enabled=false
+ssl_cert_dir=
+ncs_flags=
+host=localhost.localdomain
+env_sh_path=$(pwd)/env.sh
+
+# Timeouts
+timeout=30
+EOF
+    
+    echo ""
+    echo -e "${GREEN}L3 BGP configuration created!${NC}"
 }
 
 # Trap handler for cleanup on exit
