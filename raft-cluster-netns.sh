@@ -2009,6 +2009,8 @@ generate_auto_config() {
     
     log_info "Generating auto configuration for $num_nodes nodes (type: $config_type)"
     
+    prompt_for_env_sh
+
     case "$config_type" in
         "simple")
             generate_simple_config "$num_nodes" "$output_file"
@@ -2047,7 +2049,7 @@ ssl_enabled=true
 ssl_cert_dir=
 ncs_flags=
 host=localhost.localdomain
-env_sh_path=$(pwd)/env.sh
+env_sh_path=$ENV_SH_PATH
 
 # Timeouts
 timeout=30
@@ -2129,7 +2131,7 @@ ssl_enabled=true
 ssl_cert_dir=
 ncs_flags=
 host=localhost.localdomain
-env_sh_path=$(pwd)/env.sh
+env_sh_path=$ENV_SH_PATH
 
 # Timeouts
 timeout=30
