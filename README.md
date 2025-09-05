@@ -15,14 +15,38 @@ The `raft-cluster-netns.sh` script automates the creation of:
 ### 🚀 **Complete Environment Setup**
 - Automated network namespace creation with proper isolation
 - Bridge networking for inter-node communication
-- Hostname resolution with custom hosts files
+- Hos## Security Considerations
+
+### Network Isolation
+
+- Each node runs in isolated network namespace
+- No access to host network by default
+- Inter-node communication only through bridge
+
+### SSL/TLS Configuration
+
+**SSL is enabled by default** for secure Erlang distribution:
+
+```bash
+# Default setup includes SSL encryption
+./raft-cluster-netns.sh setup
+
+# Only disable SSL for specific testing scenarios
+./raft-cluster-netns.sh setup --no-ssl
+
+# Use custom SSL certificates for production-like testing
+./raft-cluster-netns.sh setup --ssl-cert-dir "/secure/certs"
+```th custom hosts files
 - NSO runtime directory setup with RAFT configuration
 
 ### 🔧 **Advanced Configuration**
 - Configuration file support for persistent settings
-- SSL/TLS support for secure Erlang distribution
+- **SSL/TLS enabled by default** for secure Erlang distribution
+- Optional SSL disabling with `--no-ssl` for testing scenarios
 - Customizable cluster sizes (3-N nodes)
 - Flexible network addressing schemes
+- **L3 BGP topology support** with custom subnets and ASNs
+- Auto-generation of realistic multi-location network topologies
 
 ### 🛠️ **Management & Debugging**
 - Interactive namespace shells for debugging
@@ -69,17 +93,72 @@ The `raft-cluster-netns.sh` script automates the creation of:
 ./raft-cluster-netns.sh cleanup --force
 ```
 
+### Configure Without Network Setup
+
+```bash
+# Configure NSO nodes using existing network setup
+./raft-cluster-netns.sh configure
+
+# Configure with SSL disabled (SSL is enabled by default)
+./raft-cluster-netns.sh configure --no-ssl
+
+# Configure with specific cluster settings
+./raft-cluster-netns.sh configure --cluster-name "my-cluster" -n 5
+```
+
+The `configure` command is useful when:
+- You want to reconfigure NSO nodes without recreating the network
+- Testing different NSO configurations with the same network setup
+- Applying SSL/TLS configuration to an existing cluster
+- Changing cluster settings like cluster name or node count
+
+### L3 BGP Topology Configuration
+
+The script supports advanced L3 BGP topology generation for testing complex network scenarios:
+
+```bash
+# Generate L3 BGP configuration file
+./raft-cluster-netns.sh configure --auto --type l3bgp -n 5
+
+# Setup cluster using the generated BGP configuration
+./raft-cluster-netns.sh setup -c .raft-cluster.conf
+```
+
+**L3 BGP features:**
+- **Realistic Network Topologies**: Auto-generates configurations with city-based node names (Berlin, London, Paris, Tokyo, Sydney)
+- **Unique Subnets**: Each node gets its own subnet for true L3 separation
+- **BGP ASN Assignment**: Automatic ASN allocation for BGP peering
+- **Full Mesh Connectivity**: BGP peering relationships between all nodes
+- **Manager Node**: Centralized management node with direct connections
+- **Production-Like Testing**: Simulates real-world distributed environments
+
+**Generated BGP configuration includes:**
+- Node-specific IP subnets (e.g., 192.168.30.0/24 for Berlin)
+- Unique ASN numbers (e.g., AS64511 for Berlin, AS64512 for London)
+- BGP router IDs based on geographic locations
+- Inter-node BGP peering configurations
+- Hostname resolution for realistic multi-site scenarios
+
 ### Advanced Setup
 
 ```bash
-# Setup 5-node cluster with SSL enabled
-./raft-cluster-netns.sh setup -n 5 --ssl-enabled --cluster-name "production-cluster"
+# Setup 5-node cluster (SSL enabled by default)
+./raft-cluster-netns.sh setup -n 5 --cluster-name "production-cluster"
+
+# Setup with SSL disabled (if needed for testing)
+./raft-cluster-netns.sh setup --no-ssl
 
 # Setup with custom network addressing
 ./raft-cluster-netns.sh setup --network-prefix "10.0" --bridge-name "prod-cluster"
 
 # Network-only setup (skip NSO configuration)
 ./raft-cluster-netns.sh setup --no-nso
+
+# Generate L3 BGP configuration with auto-generated topology
+./raft-cluster-netns.sh configure --auto --type l3bgp -n 5
+
+# Setup cluster using L3 BGP configuration
+./raft-cluster-netns.sh setup -c .raft-cluster.conf
 ```
 
 ## Installation & Prerequisites
@@ -121,6 +200,7 @@ export ENV_SH_PATH="/path/to/your/env.sh"
 | Command | Description | Example |
 |---------|-------------|---------|
 | `setup` | Create complete environment | `./raft-cluster-netns.sh setup` |
+| `configure` | Configure NSO nodes without network setup | `./raft-cluster-netns.sh configure` |
 | `start` | Start NSO nodes | `./raft-cluster-netns.sh start` |
 | `stop` | Stop NSO nodes | `./raft-cluster-netns.sh stop` |
 | `cleanup` | Remove all resources | `./raft-cluster-netns.sh cleanup --force` |
@@ -150,7 +230,9 @@ export ENV_SH_PATH="/path/to/your/env.sh"
 | `-p, --prefix` | Node name prefix | ha |
 | `--cluster-name` | RAFT cluster name | test-cluster |
 | `--network-prefix` | Network address prefix | 192.168 |
-| `--ssl-enabled` | Enable SSL for Erlang | false |
+| `--no-ssl` | Disable SSL for Erlang | false (SSL enabled by default) |
+| `--type` | Configuration type (simple, l3bgp) | simple |
+| `--auto` | Auto-generate configuration | - |
 | `--dry-run` | Show commands without executing | - |
 | `-v, --verbose` | Verbose output | - |
 | `-c, --config` | Configuration file | .raft-cluster.conf |
@@ -436,10 +518,18 @@ host=prod.example.com
 ncs_cli -u admin
 show ha-raft status
 
-# 4. Test configuration changes
+# 4. Test configuration changes without network recreation
+./raft-cluster-netns.sh stop
+./raft-cluster-netns.sh configure --no-ssl  # Disable SSL if needed
+./raft-cluster-netns.sh start
+
+# 5. Test different cluster configurations
+./raft-cluster-netns.sh configure --cluster-name "test-cluster" -n 5
+
+# 6. Execute commands for testing
 ./raft-cluster-netns.sh exec 2 "ncs_cmd -c 'mget /ha-raft/status/role'"
 
-# 5. Clean up when done
+# 7. Clean up when done
 ./raft-cluster-netns.sh cleanup --force
 ```
 
@@ -480,17 +570,45 @@ for nodes in 3 5 7; do
     ./raft-cluster-netns.sh setup -n $nodes --dry-run
 done
 
-# Test SSL configuration
-./raft-cluster-netns.sh setup --ssl-enabled --dry-run
+# Test SSL configuration (disabled when needed)
+./raft-cluster-netns.sh setup --no-ssl --dry-run
 
 # Test custom network ranges
 ./raft-cluster-netns.sh setup --network-prefix "172.16" --dry-run
+
+# Test L3 BGP topology generation
+./raft-cluster-netns.sh configure --auto --type l3bgp -n 5 --dry-run
+```
+
+### L3 BGP Multi-Site Testing
+
+```bash
+# Generate realistic multi-site BGP topology
+./raft-cluster-netns.sh configure --auto --type l3bgp -n 5
+
+# Review the generated configuration
+cat .raft-cluster.conf
+
+# Setup the L3 BGP cluster
+./raft-cluster-netns.sh setup -c .raft-cluster.conf
+
+# Test BGP connectivity between sites
+./raft-cluster-netns.sh test
+
+# Monitor RAFT behavior across BGP-connected sites
+./raft-cluster-netns.sh start
+./raft-cluster-netns.sh status
+
+# Test network partitions in BGP environment
+./raft-cluster-netns.sh partition berlin,london  # Europe vs Asia-Pacific split
+./raft-cluster-netns.sh status
+./raft-cluster-netns.sh heal
 ```
 
 ### Production-Like Testing
 
 ```bash
-# Create production-like environment
+# Create production-like environment (SSL enabled by default)
 cat > prod-cluster.conf << EOF
 nodes=5
 cluster_name=production-raft
@@ -721,11 +839,16 @@ set -e
 - No access to host network by default
 - Inter-node communication only through bridge
 
-### SSL/TLS Configuration
+### SSL Configuration
+
+SSL/TLS is **enabled by default** for secure Erlang distribution. To disable SSL for testing purposes:
 
 ```bash
-# Enable SSL for production-like testing
-./raft-cluster-netns.sh setup --ssl-enabled --ssl-cert-dir "/secure/certs"
+# Disable SSL for testing scenarios
+./raft-cluster-netns.sh setup --no-ssl
+
+# Use custom SSL certificate directory (SSL enabled by default)
+./raft-cluster-netns.sh setup --ssl-cert-dir "/secure/certs"
 ```
 
 ### Cleanup Security
