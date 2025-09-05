@@ -494,7 +494,7 @@ create_namespaces() {
         local veth_a="${PREFIX}${i}a"
         local node_ip="${NETWORK_PREFIX}.${i}.1"
         
-        log_debug "Creating namespace: $netns"
+        log_info "Creating namespace: $netns"
         
         # Create namespace
         execute_cmd "sudo ip netns add $netns"
@@ -512,7 +512,11 @@ create_namespaces() {
         
         # Add hosts file
         add_hosts_to_namespace "$i"
+        
+        log_info "Namespace $netns created successfully"
     done
+    
+    log_info "All namespaces created successfully"
 }
 
 # Delete network namespaces
@@ -546,6 +550,7 @@ setup_bridge() {
     
     # Create bridge
     execute_cmd "sudo ip link add dev $BRIDGE_NAME type bridge"
+    log_info "Bridge $BRIDGE_NAME created"
     
     # Connect all veth interfaces to bridge
     for ((i=1; i<=NODES; i++)); do
@@ -1044,6 +1049,15 @@ setup_nso_node() {
     local env_source=$(get_nso_env_source)
     
     log_debug "Setting up NSO node $node_id in $node_dir"
+    log_debug "ENV_SH_PATH: '$ENV_SH_PATH'"
+    log_debug "env_source: '$env_source'"
+    
+    # Ensure NSO environment is available
+    if [[ -z "$env_source" ]]; then
+        log_error "NSO environment not configured - env_source is empty"
+        log_error "ENV_SH_PATH is: '$ENV_SH_PATH'"
+        return 1
+    fi
     
     # Remove existing directory if it exists
     if [[ -d "$node_dir" ]]; then
@@ -1065,11 +1079,15 @@ setup_nso_node() {
     
     # Create NSO runtime directory (with environment sourced)
     log_debug "Running ncs-setup for node $node_id"
+    local ncs_setup_cmd="$env_source; ncs-setup --dest $node_dir --no-netsim"
+    log_debug "Command: bash -c '$ncs_setup_cmd'"
+    
     if [[ "${DRY_RUN}" == "true" ]]; then
-        echo "[DRY-RUN] bash -c '$env_source; ncs-setup --dest $node_dir --no-netsim'"
+        echo "[DRY-RUN] bash -c '$ncs_setup_cmd'"
     else
-        if ! bash -c "$env_source; ncs-setup --dest $node_dir --no-netsim"; then
+        if ! bash -c "$ncs_setup_cmd"; then
             log_error "Failed to run ncs-setup for node $node_id"
+            log_error "Command was: bash -c '$ncs_setup_cmd'"
             return 1
         fi
     fi
