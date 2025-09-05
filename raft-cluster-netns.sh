@@ -2038,7 +2038,7 @@ generate_simple_config() {
 nodes=$num_nodes
 cluster_name=auto-cluster
 prefix=ha
-work_dir=$(pwd)
+work_dir=$WORK_DIR
 
 # Network settings (simple mode)
 network_prefix=192.168
@@ -2071,7 +2071,7 @@ generate_l3bgp_config() {
 nodes=$num_nodes
 cluster_name=bgp-cluster
 prefix=l3bgp
-work_dir=$(pwd)
+work_dir=$WORK_DIR
 
 # Network topology type
 network_type=l3bgp
@@ -2255,7 +2255,7 @@ create_interactive_simple_config() {
 nodes=$num_nodes
 cluster_name=$cluster_name
 prefix=$prefix
-work_dir=$(pwd)
+work_dir=$WORK_DIR
 
 # Network settings
 network_prefix=$network_prefix
@@ -2301,7 +2301,7 @@ create_interactive_l3bgp_config() {
 nodes=$num_nodes
 cluster_name=$cluster_name
 prefix=$prefix
-work_dir=$(pwd)
+work_dir=$WORK_DIR
 
 # Network topology type
 network_type=l3bgp
