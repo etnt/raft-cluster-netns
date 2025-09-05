@@ -191,6 +191,21 @@ find_env_sh() {
         "../../../env.sh"
     )
     
+    # Try to detect NSO installation via 'ncs' command in PATH
+    if command -v ncs >/dev/null 2>&1; then
+        local ncs_path
+        ncs_path=$(which ncs)
+        if [[ -n "$ncs_path" ]]; then
+            local ncs_bin_dir
+            ncs_bin_dir=$(dirname "$ncs_path")
+            # Look for env.sh relative to NSO bin directory
+            search_paths+=("$ncs_bin_dir/../env.sh")
+            search_paths+=("$ncs_bin_dir/../../env.sh")
+            search_paths+=("$ncs_bin_dir/../../../env.sh")
+            log_debug "Detected NSO installation at: $ncs_bin_dir"
+        fi
+    fi
+    
     # If NCS_DIR is set, try to find env.sh relative to it
     if [[ -n "${NCS_DIR:-}" ]]; then
         search_paths+=("$NCS_DIR/../env.sh")
@@ -212,6 +227,16 @@ find_env_sh() {
 prompt_for_env_sh() {
     echo
     log_warn "NSO environment script (env.sh) not found or not configured"
+    
+    # Show detection attempts
+    if command -v ncs >/dev/null 2>&1; then
+        local ncs_path
+        ncs_path=$(which ncs)
+        log_info "Detected NSO command at: $ncs_path"
+        log_info "Searched for env.sh relative to NSO installation"
+    else
+        log_info "NSO 'ncs' command not found in PATH"
+    fi
     
     # Try to find it automatically
     local found_env_sh
@@ -250,8 +275,16 @@ prompt_for_env_sh() {
 setup_nso_environment() {
     # Check if env.sh path is configured
     if [[ -z "$ENV_SH_PATH" ]]; then
-        if ! prompt_for_env_sh; then
-            return 1
+        # Try automatic detection first
+        local found_env_sh
+        if found_env_sh=$(find_env_sh); then
+            log_info "Auto-detected env.sh at: $found_env_sh"
+            ENV_SH_PATH="$found_env_sh"
+        else
+            # Fall back to prompting user
+            if ! prompt_for_env_sh; then
+                return 1
+            fi
         fi
         
         # Save the path to config file
