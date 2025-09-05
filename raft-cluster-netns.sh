@@ -17,7 +17,7 @@ DEFAULT_WORK_DIR="$(pwd)"
 DEFAULT_CLUSTER_NAME="test-cluster"
 DEFAULT_NETWORK_PREFIX="192.168"
 DEFAULT_BRIDGE_NAME="ha-cluster"
-DEFAULT_SSL_ENABLED="false"
+DEFAULT_SSL_ENABLED="true"
 DEFAULT_TIMEOUT=30
 DEFAULT_CONFIG_FILE=".raft-cluster.conf"
 
@@ -867,6 +867,140 @@ get_seed_node_address() {
     echo "ncsd${seed_id}@${PREFIX}${seed_id}.ha-cluster"
 }
 
+# =============================================================================
+# SSL Certificate Setup Functions
+# =============================================================================
+
+# Setup SSL certificates using external script
+setup_ssl_certificates() {
+    if [[ "$SSL_ENABLED" != "true" ]]; then
+        log_debug "SSL disabled, skipping certificate setup"
+        return 0
+    fi
+    
+    log_info "Setting up SSL certificates for Distributed Erlang..."
+    
+    local ssl_script="$(dirname "$0")/setup-ssl-certs.sh"
+    local ssl_nodes="$NODES"
+    
+    # Convert nodes to space-separated list (0-based for SSL script)
+    local ssl_node_list=""
+    for ((i=1; i<=NODES; i++)); do
+        ssl_node_list="$ssl_node_list $((i-1))"
+    done
+    ssl_node_list="${ssl_node_list# }"  # Remove leading space
+    
+    # Check if SSL script exists
+    if [[ ! -f "$ssl_script" ]]; then
+        log_error "SSL certificate setup script not found: $ssl_script"
+        log_error "Please ensure setup-ssl-certs.sh is in the same directory as this script"
+        return 1
+    fi
+    
+    # Make sure SSL script is executable
+    if [[ ! -x "$ssl_script" ]]; then
+        log_debug "Making SSL script executable"
+        execute_cmd "chmod +x '$ssl_script'"
+    fi
+    
+    # Prepare SSL script arguments
+    local ssl_args=(
+        "--nodes" "$ssl_node_list"
+        "--work-dir" "$WORK_DIR"
+    )
+    
+    if [[ "${VERBOSE}" == "true" ]]; then
+        ssl_args+=("--verbose")
+    fi
+    
+    if [[ "${DRY_RUN}" == "true" ]]; then
+        ssl_args+=("--dry-run")
+    fi
+    
+    # Run SSL certificate setup
+    log_debug "Running: $ssl_script setup ${ssl_args[*]}"
+    
+    if [[ "${DRY_RUN}" == "true" ]]; then
+        echo "[DRY-RUN] $ssl_script setup ${ssl_args[*]}"
+    else
+        if ! "$ssl_script" setup "${ssl_args[@]}"; then
+            log_error "Failed to setup SSL certificates"
+            return 1
+        fi
+    fi
+    
+    # Verify SSL certificates were created
+    if [[ "${DRY_RUN}" != "true" ]]; then
+        local erldist_dir="$WORK_DIR/erldist/ssl"
+        if [[ ! -d "$erldist_dir" ]]; then
+            log_error "SSL certificate directory not created: $erldist_dir"
+            return 1
+        fi
+        
+        # Check for required CA certificates
+        for ca in 1 2; do
+            local ca_cert="$erldist_dir/ca${ca}/cert.pem"
+            if [[ ! -f "$ca_cert" ]]; then
+                log_warn "CA${ca} certificate not found: $ca_cert"
+            fi
+        done
+        
+        # Check for node certificates
+        for ((i=1; i<=NODES; i++)); do
+            local ssl_node_idx=$((i-1))
+            local node_cert="$erldist_dir/ca1/certs/ncs${ssl_node_idx}_cert.pem"
+            local ha_cert="$erldist_dir/ca1/certs/ha${i}_cert.pem"
+            
+            if [[ ! -f "$node_cert" ]]; then
+                log_warn "Node certificate not found: $node_cert"
+            fi
+            
+            if [[ ! -f "$ha_cert" ]]; then
+                log_warn "HA certificate not found: $ha_cert"
+            fi
+        done
+        
+        log_info "SSL certificates setup completed successfully"
+    fi
+}
+
+# Cleanup SSL certificates
+cleanup_ssl_certificates() {
+    if [[ "$SSL_ENABLED" != "true" ]]; then
+        log_debug "SSL disabled, skipping certificate cleanup"
+        return 0
+    fi
+    
+    log_info "Cleaning up SSL certificates..."
+    
+    local ssl_script="$(dirname "$0")/setup-ssl-certs.sh"
+    
+    if [[ -f "$ssl_script" ]] && [[ -x "$ssl_script" ]]; then
+        local ssl_args=("--work-dir" "$WORK_DIR")
+        
+        if [[ "${VERBOSE}" == "true" ]]; then
+            ssl_args+=("--verbose")
+        fi
+        
+        if [[ "${DRY_RUN}" == "true" ]]; then
+            ssl_args+=("--dry-run")
+        fi
+        
+        log_debug "Running: $ssl_script cleanup ${ssl_args[*]}"
+        "$ssl_script" cleanup "${ssl_args[@]}" || log_warn "SSL cleanup may have failed"
+    else
+        # Fallback cleanup
+        local erldist_dir="$WORK_DIR/erldist"
+        if [[ -d "$erldist_dir" ]]; then
+            execute_cmd "rm -rf '$erldist_dir'"
+        fi
+    fi
+}
+
+# =============================================================================
+# NSO Setup Functions
+# =============================================================================
+
 # Setup NSO node directory and configuration
 setup_nso_node() {
     local node_id="$1"
@@ -953,9 +1087,15 @@ apply_raft_config() {
     local node_address="$3"
     local seed_address="$4"
     local ncs_conf="$node_dir/ncs.conf"
-    local ssl_keyfile="../erldist/ssl/ncs${node_id}/server_key.pem"
-    local ssl_certfile="../erldist/ssl/ca/certs/${PREFIX}${node_id}_cert.pem"
-    local ssl_cacertfile="../erldist/ssl/ca/cert.pem"
+    
+    # Use actual 0-based node index for SSL (node_id is 1-based)
+    local ssl_node_idx=$((node_id - 1))
+    
+    # Use correct SSL paths matching the SSL setup script output
+    # Use node_id for certificate name to match the hostname (ha1, ha2, etc.)
+    local ssl_keyfile="../erldist/ssl/ncs${ssl_node_idx}/server_key.pem"
+    local ssl_certfile="../erldist/ssl/ca1/certs/ha${node_id}_cert.pem"
+    local ssl_cacertfile="../erldist/ssl/ca1/cert.pem"
     local ssl_crldir="../erldist/ssl/crl"
     
     log_debug "Applying RAFT configuration for node $node_id"
@@ -988,24 +1128,42 @@ apply_ssl_config() {
     local node_id="$1"
     local node_dir="$2"
     local ncs_conf="$node_dir/ncs.conf"
-    local ssl_keyfile="../erldist/ssl/ncs${node_id}/server_key.pem"
-    local ssl_certfile="../erldist/ssl/ca/certs/${PREFIX}${node_id}_cert.pem"
-    local ssl_cacertfile="../erldist/ssl/ca/cert.pem"
     
-    log_debug "Applying SSL configuration for node $node_id"
+    # Use actual 0-based node index for SSL (node_id is 1-based)
+    local ssl_node_idx=$((node_id - 1))
     
-    # Configure WebUI SSL
+    # Paths based on actual SSL script output structure
+    # Use node_id for certificate name to match the hostname (ha1, ha2, etc.)
+    local ssl_keyfile="../erldist/ssl/ncs${ssl_node_idx}/server_key.pem"
+    local ssl_certfile="../erldist/ssl/ca1/certs/ha${node_id}_cert.pem"
+    local ssl_cacertfile="../erldist/ssl/ca1/cert.pem"
+    
+    log_debug "Applying SSL configuration for node $node_id (SSL index: $ssl_node_idx)"
+    
+    # Configure WebUI SSL - enable and set certificate paths
     execute_cmd "sed -i '/<webui>/,/<\\/webui>/{
         s/<!-- \\(.*\\) -->/\\1/;
-        s|<\\(key-file\\)>[^<]*</\\1>|<\\1>${ssl_keyfile}</\\1>|;
-        s|<\\(cert-file\\)>[^<]*</\\1>|<\\1>${ssl_certfile}</\\1>|;
-        s|</cert-file>|&<ca-cert-file>${ssl_cacertfile}</ca-cert-file>|;
+        s|<enabled>false</enabled>|<enabled>true</enabled>|;
+        s|<ssl>.*</ssl>|<ssl><enabled>true</enabled><key-file>${ssl_keyfile}</key-file><cert-file>${ssl_certfile}</cert-file><ca-cert-file>${ssl_cacertfile}</ca-cert-file></ssl>|;
     }' \"$ncs_conf\""
     
-    # Enable SSL in RAFT configuration
+    # Enable SSL in RAFT configuration with proper certificate paths
     execute_cmd "sed -i '/<ha-raft>/,/<\\/ha-raft>/{
-        s|<ssl>.*|<ssl><enabled>true</enabled>|;
+        /<ssl>/,/<\\/ssl>/{
+            # Delete everything between <ssl> and </ssl> tags
+            /<ssl>/,/<\\/ssl>/d;
+        }
+        # Insert the new SSL configuration before the </ha-raft> closing tag
+        /<\\/ha-raft>/i\\
+    <ssl>\\
+      <enabled>true</enabled>\\
+      <key-file>${ssl_keyfile}</key-file>\\
+      <cert-file>${ssl_certfile}</cert-file>\\
+      <ca-cert-file>${ssl_cacertfile}</ca-cert-file>\\
+    </ssl>
     }' \"$ncs_conf\""
+    
+    log_debug "SSL configuration applied - Key: $ssl_keyfile, Cert: $ssl_certfile, CA: $ssl_cacertfile"
 }
 
 # Setup all NSO nodes
@@ -1039,8 +1197,9 @@ start_nso_node() {
     
     log_debug "Starting NSO node $node_id in namespace $netns"
     
-    # Start NCS in the namespace (with environment sourced)
-    execute_cmd "sudo ip netns exec $netns bash -c '
+    # Start NCS in the namespace (with environment sourced, as local user)
+    local user_name=$(id -un)
+    execute_cmd "sudo ip netns exec $netns sudo -u $user_name bash -c '
         $env_source
         export NCS_IPC_ADDR=$node_ip
         export NCS_DEBUG_DUMP_NAME=\"\${LUX_EXTRA_LOGS:-/tmp}/$node_dir/stop.dump\"
@@ -1080,8 +1239,9 @@ stop_nso_node() {
     
     log_debug "Stopping NSO node $node_id"
     
-    # Try to stop gracefully first (with environment sourced)
-    execute_cmd "sudo ip netns exec $netns bash -c '
+    # Try to stop gracefully first (with environment sourced, as local user)
+    local user_name=$(id -un)
+    execute_cmd "sudo ip netns exec $netns sudo -u $user_name bash -c '
         $env_source
         export NCS_IPC_ADDR=$node_ip
         ncs --stop
@@ -1244,6 +1404,10 @@ setup_network() {
 # Setup complete environment (network + NSO)
 setup_environment() {
     setup_network
+    
+    # Setup SSL certificates before NSO if enabled
+    setup_ssl_certificates
+    
     setup_nso_nodes
     log_info "Environment setup completed successfully"
 }
@@ -1282,6 +1446,12 @@ cleanup_environment() {
     
     if ! cleanup_network; then
         log_error "Failed to cleanup network infrastructure"
+        cleanup_failed=true
+    fi
+    
+    # Cleanup SSL certificates
+    if ! cleanup_ssl_certificates; then
+        log_warn "Failed to cleanup SSL certificates, continuing..."
         cleanup_failed=true
     fi
     
@@ -1328,7 +1498,7 @@ SETUP OPTIONS:
     --cluster-name <name>   RAFT cluster name (default: $DEFAULT_CLUSTER_NAME)
     --network-prefix <ip>   Network address prefix (default: $DEFAULT_NETWORK_PREFIX)
     --bridge-name <name>    Bridge interface name (default: $DEFAULT_BRIDGE_NAME)
-    --ssl-enabled           Enable SSL for Erlang distribution
+    --no-ssl                Disable SSL for Erlang distribution (SSL enabled by default)
     --ssl-cert-dir <dir>    SSL certificate directory
     --ncs-flags <flags>     Additional flags to pass to NCS
     --no-nso                Setup only network, skip NSO configuration
@@ -1342,7 +1512,7 @@ EXAMPLES:
     $SCRIPT_NAME setup
 
     # Setup 5-node cluster with SSL enabled
-    $SCRIPT_NAME setup -n 5 --ssl-enabled
+    $SCRIPT_NAME setup -n 5 --no-ssl
 
     # Setup network only (no NSO)
     $SCRIPT_NAME setup --no-nso
@@ -1403,7 +1573,7 @@ CONFIGURATION FILE:
     bridge_name=ha-cluster
     
     # NSO settings  
-    ssl_enabled=false
+    ssl_enabled=true
     ncs_flags=-v
 
 EOF
@@ -1469,8 +1639,8 @@ parse_args() {
                 BRIDGE_NAME="$2"
                 shift 2
                 ;;
-            --ssl-enabled)
-                SSL_ENABLED=true
+            --no-ssl)
+                SSL_ENABLED=false
                 shift
                 ;;
             --ssl-cert-dir)
@@ -1703,18 +1873,28 @@ enter_namespace_shell() {
     local user_name=$(id -un)
     local user_home=$(getent passwd "$user_name" | cut -d: -f6)
     local start_dir="$PWD"
-    sudo ip netns exec "$netns" sudo -u "$user_name" bash --init-file <(echo "
-        $env_source
-        cd '$start_dir'
-        export PS1='[$netns] \u@\h:\w$ '
-        export NCS_IPC_ADDR=${NETWORK_PREFIX}.${node_id}.1
-        echo 'Namespace: $netns'
-        echo 'Node IP: ${NETWORK_PREFIX}.${node_id}.1'
-        echo 'NSO Environment: ${ENV_SH_PATH:-not configured}'
-        echo 'Available hosts:'
-        cat /etc/hosts | grep ha-cluster
-        echo 'NSO Commands available: ncs, ncs_cli, ncs_cmd'
-    ")
+    
+    # Create a temporary init file for the shell
+    local init_file=$(mktemp)
+    cat > "$init_file" << EOF
+# Source NSO environment
+$env_source
+cd '$start_dir'
+export PS1='[$netns] \u@\h:\w$ '
+export NCS_IPC_ADDR=${NETWORK_PREFIX}.${node_id}.1
+echo 'Namespace: $netns'
+echo 'Node IP: ${NETWORK_PREFIX}.${node_id}.1'
+echo 'NSO Environment: ${ENV_SH_PATH:-not configured}'
+echo 'Available hosts:'
+cat /etc/hosts | grep ha-cluster 2>/dev/null || echo "  (no ha-cluster hosts found)"
+echo 'NSO Commands available: ncs, ncs_cli, ncs_cmd'
+EOF
+    
+    # Enter the namespace with the init file
+    sudo ip netns exec "$netns" sudo -u "$user_name" bash --init-file "$init_file"
+    
+    # Clean up the temporary init file
+    rm -f "$init_file"
 }
 
 # Execute command in namespace
@@ -1793,7 +1973,7 @@ network_prefix=192.168
 bridge_name=ha-cluster
 
 # NSO settings
-ssl_enabled=false
+ssl_enabled=true
 ssl_cert_dir=
 ncs_flags=
 host=localhost.localdomain
@@ -1875,7 +2055,7 @@ EOF
     cat >> "$output_file" << EOF
 
 # NSO settings
-ssl_enabled=false
+ssl_enabled=true
 ssl_cert_dir=
 ncs_flags=
 host=localhost.localdomain
@@ -2010,7 +2190,7 @@ network_prefix=$network_prefix
 bridge_name=$bridge_name
 
 # NSO settings
-ssl_enabled=false
+ssl_enabled=true
 ssl_cert_dir=
 ncs_flags=
 host=localhost.localdomain
@@ -2119,7 +2299,7 @@ EOF
     # Add remaining config
     cat >> "$output_file" << EOF
 # NSO settings
-ssl_enabled=false
+ssl_enabled=true
 ssl_cert_dir=
 ncs_flags=
 host=localhost.localdomain
