@@ -964,6 +964,7 @@ setup_ssl_certificates() {
     local ssl_args=(
         "--nodes" "$ssl_node_list"
         "--work-dir" "$WORK_DIR"
+        "--prefix" "$PREFIX"
     )
     
     if [[ "${VERBOSE}" == "true" ]]; then
@@ -1006,7 +1007,7 @@ setup_ssl_certificates() {
         for ((i=1; i<=NODES; i++)); do
             local ssl_node_idx=$((i-1))
             local node_cert="$erldist_dir/ca1/certs/ncs${ssl_node_idx}_cert.pem"
-            local ha_cert="$erldist_dir/ca1/certs/ha${i}_cert.pem"
+            local ha_cert="$erldist_dir/ca1/certs/${PREFIX}${i}_cert.pem"
             
             if [[ ! -f "$node_cert" ]]; then
                 log_warn "Node certificate not found: $node_cert"
@@ -1162,9 +1163,9 @@ apply_raft_config() {
     local ssl_node_idx=$((node_id - 1))
     
     # Use correct SSL paths matching the SSL setup script output
-    # Use node_id for certificate name to match the hostname (ha1, ha2, etc.)
+    # Use node_id for certificate name to match the hostname (PREFIX1, PREFIX2, etc.)
     local ssl_keyfile="../erldist/ssl/ncs${ssl_node_idx}/server_key.pem"
-    local ssl_certfile="../erldist/ssl/ca1/certs/ha${node_id}_cert.pem"
+    local ssl_certfile="../erldist/ssl/ca1/certs/${PREFIX}${node_id}_cert.pem"
     local ssl_cacertfile="../erldist/ssl/ca1/cert.pem"
     local ssl_crldir="../erldist/ssl/crl"
     
@@ -1203,9 +1204,9 @@ apply_ssl_config() {
     local ssl_node_idx=$((node_id - 1))
     
     # Paths based on actual SSL script output structure
-    # Use node_id for certificate name to match the hostname (ha1, ha2, etc.)
+    # Use node_id for certificate name to match the hostname (PREFIX1, PREFIX2, etc.)
     local ssl_keyfile="../erldist/ssl/ncs${ssl_node_idx}/server_key.pem"
-    local ssl_certfile="../erldist/ssl/ca1/certs/ha${node_id}_cert.pem"
+    local ssl_certfile="../erldist/ssl/ca1/certs/${PREFIX}${node_id}_cert.pem"
     local ssl_cacertfile="../erldist/ssl/ca1/cert.pem"
     
     log_debug "Applying SSL configuration for node $node_id (SSL index: $ssl_node_idx)"
