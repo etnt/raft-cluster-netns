@@ -4,39 +4,18 @@ This script provides a complete solution for setting up isolated virtual network
 
 ## Overview
 
-The `raft-cluster-netns.sh` script automates the creation of:
+The `raft-cluster-netns.sh` script automates the creation of complete NSO RAFT cluster testing environments using Linux network namespaces. It provides:
 
-- **Virtual Network Infrastructure**: Isolated network namespaces with veth pairs and bridge networking
-- **NSO Cluster Configuration**: Complete NSO setup with RAFT clustering configuration
-- **Development Environment**: Tools for testing, debugging, and managing the cluster
+- **Virtual Network Infrastructure**: Isolated network namespaces with bridge networking
+- **NSO Cluster Configuration**: Complete RAFT setup with SSL/TLS enabled by default  
+- **Development Tools**: Testing, debugging, and partition simulation capabilities
 
 ## Features
 
 ### 🚀 **Complete Environment Setup**
 - Automated network namespace creation with proper isolation
 - Bridge networking for inter-node communication
-- Hos## Security Considerations
-
-### Network Isolation
-
-- Each node runs in isolated network namespace
-- No access to host network by default
-- Inter-node communication only through bridge
-
-### SSL/TLS Configuration
-
-**SSL is enabled by default** for secure Erlang distribution:
-
-```bash
-# Default setup includes SSL encryption
-./raft-cluster-netns.sh setup
-
-# Only disable SSL for specific testing scenarios
-./raft-cluster-netns.sh setup --no-ssl
-
-# Use custom SSL certificates for production-like testing
-./raft-cluster-netns.sh setup --ssl-cert-dir "/secure/certs"
-```th custom hosts files
+- Hostname resolution with custom hosts files
 - NSO runtime directory setup with RAFT configuration
 
 ### 🔧 **Advanced Configuration**
@@ -178,14 +157,19 @@ The script checks for these system commands:
 
 ### NSO Environment Setup
 
-The script automatically detects your NSO environment by looking for `env.sh`:
+The script automatically detects your NSO environment by:
+
+1. **Auto-detection via PATH**: Looks for `ncs` command and finds `env.sh` relative to NSO installation
+2. **Standard search paths**: Checks common locations for `env.sh`
+3. **Interactive prompting**: Asks for the path if auto-detection fails
 
 ```bash
-# The script searches these locations:
+# The script searches these locations automatically:
 ./env.sh
 ../env.sh  
 ../../env.sh
 $NCS_DIR/../env.sh
+$(dirname $(which ncs))/../env.sh    # Auto-detected from ncs command
 ```
 
 Or specify manually:
