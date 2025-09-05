@@ -891,6 +891,11 @@ setup_nso_node() {
         execute_cmd "mkdir -p $parent_dir"
     fi
     
+    # Ensure destination directory exists before ncs-setup
+    # ncs-setup requires the destination directory to exist
+    log_debug "Ensuring node directory exists: $node_dir"
+    execute_cmd "mkdir -p $node_dir"
+    
     # Create NSO runtime directory (with environment sourced)
     log_debug "Running ncs-setup for node $node_id"
     if [[ "${DRY_RUN}" == "true" ]]; then
