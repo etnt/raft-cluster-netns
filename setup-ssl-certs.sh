@@ -16,6 +16,7 @@ OPENSSL="${OPENSSL:-openssl}"
 OPENSSL_CONF_IN="${OPENSSL_CONF_IN:-./openssl.conf.in}"
 CA_SERIAL_START_INDEX="${CA_SERIAL_START_INDEX:-FF}"
 WORK_DIR="${WORK_DIR:-$(pwd)}"
+PREFIX="${PREFIX:-ha}"
 VERBOSE="${VERBOSE:-false}"
 DRY_RUN="${DRY_RUN:-false}"
 
@@ -77,6 +78,7 @@ get_end_date() {
 create_openssl_conf() {
     local ca_num="$1"
     local conf_file="$WORK_DIR/erldist/ssl/ca${ca_num}/openssl.conf"
+    local ca_dir="$WORK_DIR/erldist/ssl/ca${ca_num}"
     
     log_debug "Creating OpenSSL config for CA${ca_num}: $conf_file"
     
@@ -85,7 +87,8 @@ create_openssl_conf() {
         return 1
     fi
     
-    execute_cmd "sed 's/__CA__/ca${ca_num}/' '$OPENSSL_CONF_IN' > '$conf_file'"
+    # Replace __CA__ placeholder with the absolute path to the CA directory
+    execute_cmd "sed 's|erldist/ssl/__CA__|$ca_dir|g' '$OPENSSL_CONF_IN' > '$conf_file'"
 }
 
 # Create default OpenSSL configuration template if missing
@@ -238,8 +241,8 @@ generate_server_cert() {
     
     # HA cluster key and CSR with 1-based indexing for certificate names
     local ha_node_id=$((node + 1))
-    local ha_csr="$ca_dir/csr/ha${ha_node_id}_csr.pem"
-    local ha_cert="$ca_dir/certs/ha${ha_node_id}_cert.pem"
+    local ha_csr="$ca_dir/csr/${PREFIX}${ha_node_id}_csr.pem"
+    local ha_cert="$ca_dir/certs/${PREFIX}${ha_node_id}_cert.pem"
     
     log_debug "Generating server certificate for node ${node} with CA${ca_num}"
     
@@ -251,14 +254,14 @@ generate_server_cert() {
     
     # Generate HA cluster CSR with 1-based indexing for hostnames
     local ha_node_id=$((node + 1))
-    generate_csr "$server_key" "$ha_csr" "/CN=ha${ha_node_id}.ha-cluster" "$config_file"
+    generate_csr "$server_key" "$ha_csr" "/CN=${PREFIX}${ha_node_id}.ha-cluster" "$config_file"
     
     # Generate server certificate with SAN for localhost
     log_debug "Signing server certificate with subjectAltName"
     execute_cmd "$OPENSSL ca -config '$config_file' -batch -enddate '$end_date' -out '$server_cert' -in '$server_csr' -extfile <(printf 'subjectAltName=DNS:localhost.localdomain,IP:127.0.0.1')"
     
     # Generate HA cluster certificate with proper SubjectAltName
-    local ha_hostname="ha${ha_node_id}.ha-cluster"
+    local ha_hostname="${PREFIX}${ha_node_id}.ha-cluster"
     local ha_ip="192.168.${ha_node_id}.1"
     log_debug "Signing HA certificate with subjectAltName for ${ha_hostname} (${ha_ip})"
     execute_cmd "$OPENSSL ca -config '$config_file' -batch -enddate '$end_date' -out '$ha_cert' -in '$ha_csr' -extfile <(printf 'subjectAltName=DNS:${ha_hostname},IP:${ha_ip}')"
@@ -416,6 +419,7 @@ OPTIONS:
     --nodes <list>          Space-separated list of node numbers (default: "0 1 2 3 4 5")
     --cas <list>            Space-separated list of CA numbers (default: "1 2 12")
     --work-dir <dir>        Working directory (default: current directory)
+    --prefix <prefix>       Node name prefix (default: "ha")
     --openssl <path>        Path to openssl binary (default: openssl)
     --config-template <file> OpenSSL config template (default: ./openssl.conf.in)
     --verbose               Verbose output
@@ -447,6 +451,7 @@ ENVIRONMENT VARIABLES:
     OPENSSL                 Override openssl binary path
     OPENSSL_CONF_IN         Override config template path
     WORK_DIR                Override working directory
+    PREFIX                  Override node name prefix
     VERBOSE                 Enable verbose output (true/false)
     DRY_RUN                 Enable dry run mode (true/false)
 
@@ -476,6 +481,11 @@ parse_args() {
             --work-dir)
                 shift
                 WORK_DIR="$(cd "$1" && pwd)"  # Convert to absolute path
+                shift
+                ;;
+            --prefix)
+                shift
+                PREFIX="$1"
                 shift
                 ;;
             --openssl)
