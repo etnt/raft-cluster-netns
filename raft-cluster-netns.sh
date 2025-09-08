@@ -13,7 +13,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # Default configuration
 DEFAULT_NODES=3
 DEFAULT_PREFIX="ha"
-DEFAULT_WORK_DIR="$(pwd)"
+DEFAULT_WORK_DIR="$(pwd)/work_dir"
 DEFAULT_CLUSTER_NAME="test-cluster"
 DEFAULT_NETWORK_PREFIX="192.168"
 DEFAULT_NETWORK_TYPE="simple"
@@ -108,7 +108,7 @@ load_config_file() {
             manager_ip) MANAGER_IP="$value" ;;
             node_*) 
                 # Handle node-specific configuration (e.g., node_1_ip, node_1_hostname)
-                declare -g "$key=$value"  # Make it global so modules can access it
+                declare "$key=$value"
                 ;;
         esac
     done < "$config_file"
@@ -598,9 +598,7 @@ show_partition_status() {
             if [[ "$i" == "$j" ]]; then
                 printf "%8s" "SELF"
             else
-                # Get the actual IP for the target node from L3BGP configuration
-                local target_ip_var="node_${j}_ip"
-                local target_ip="${!target_ip_var:-${NETWORK_PREFIX}.${j}.1}"
+                local target_ip="${NETWORK_PREFIX}.${j}.1"
                 if sudo ip netns exec "$netns_i" ping -c 1 -W 1 "$target_ip" >/dev/null 2>&1; then
                     printf "%8s" "✓"
                 else
@@ -758,14 +756,7 @@ cleanup_ssl_certificates() {
 setup_nso_node() {
     local node_id="$1"
     local node_dir="${WORK_DIR}/ncs-run${node_id}"
-    
-    # Use actual IP from L3BGP configuration if available, fallback to default pattern
-    local node_ip_var="node_${node_id}_ip"
-    local node_ip="${!node_ip_var}"
-    if [[ -z "$node_ip" ]]; then
-        node_ip="${NETWORK_PREFIX}.${node_id}.1"
-    fi
-    
+    local node_ip="${NETWORK_PREFIX}.${node_id}.1"
     local node_address="ncsd${node_id}@${PREFIX}${node_id}.ha-cluster"
     local seed_address=$(get_seed_node_address "$node_id")
     local env_source=$(get_nso_env_source)
@@ -965,14 +956,7 @@ start_nso_node() {
     local node_id="$1"
     local node_dir="${WORK_DIR}/ncs-run${node_id}"
     local netns="${PREFIX}${node_id}ns"
-    
-    # Use actual IP from L3BGP configuration if available, fallback to default pattern
-    local node_ip_var="node_${node_id}_ip"
-    local node_ip="${!node_ip_var}"
-    if [[ -z "$node_ip" ]]; then
-        node_ip="${NETWORK_PREFIX}.${node_id}.1"
-    fi
-    
+    local node_ip="${NETWORK_PREFIX}.${node_id}.1"
     local env_source=$(get_nso_env_source)
     
     if [[ ! -d "$node_dir" ]]; then
@@ -1018,14 +1002,7 @@ start_nso_nodes() {
 # Stop a single NSO node
 stop_nso_node() {
     local node_id="$1"
-    
-    # Use actual IP from L3BGP configuration if available, fallback to default pattern
-    local node_ip_var="node_${node_id}_ip"
-    local node_ip="${!node_ip_var}"
-    if [[ -z "$node_ip" ]]; then
-        node_ip="${NETWORK_PREFIX}.${node_id}.1"
-    fi
-    
+    local node_ip="${NETWORK_PREFIX}.${node_id}.1"
     local netns="${PREFIX}${node_id}ns"
     local env_source=$(get_nso_env_source)
     
@@ -1113,11 +1090,7 @@ cleanup_nso_nodes() {
 # Check NSO node status
 check_nso_node_status() {
     local node_id="$1"
-    
-    # Get the actual IP for this node from L3BGP configuration
-    local node_ip_var="node_${node_id}_ip"
-    local node_ip="${!node_ip_var:-${NETWORK_PREFIX}.${node_id}.1}"
-    
+    local node_ip="${NETWORK_PREFIX}.${node_id}.1"
     local netns="${PREFIX}${node_id}ns"
     local env_source=$(get_nso_env_source)
     
@@ -1162,9 +1135,7 @@ show_nso_status() {
     echo "  RAFT Status:"
     local env_source=$(get_nso_env_source)
     for ((i=1; i<=NODES; i++)); do
-        # Get the actual IP for this node from L3BGP configuration
-        local node_ip_var="node_${i}_ip"
-        local node_ip="${!node_ip_var:-${NETWORK_PREFIX}.${i}.1}"
+        local node_ip="${NETWORK_PREFIX}.${i}.1"
         local netns="${PREFIX}${i}ns"
         
         local leader=$(sudo ip netns exec "$netns" bash -c "
@@ -1660,13 +1631,6 @@ enter_namespace_shell() {
     local netns="${PREFIX}${node_id}ns"
     local env_source=$(get_nso_env_source)
     
-    # Use actual IP from L3BGP configuration if available, fallback to default pattern
-    local node_ip_var="node_${node_id}_ip"
-    local node_ip="${!node_ip_var}"
-    if [[ -z "$node_ip" ]]; then
-        node_ip="${NETWORK_PREFIX}.${node_id}.1"
-    fi
-    
     if ! ip netns list | grep -q "^$netns"; then
         log_error "Namespace $netns does not exist"
         exit 1
@@ -1686,9 +1650,9 @@ enter_namespace_shell() {
 $env_source
 cd '$start_dir'
 export PS1='[$netns] \u@\h:\w$ '
-export NCS_IPC_ADDR=$node_ip
+export NCS_IPC_ADDR=${NETWORK_PREFIX}.${node_id}.1
 echo 'Namespace: $netns'
-echo 'Node IP: $node_ip'
+echo 'Node IP: ${NETWORK_PREFIX}.${node_id}.1'
 echo 'NSO Environment: ${ENV_SH_PATH:-not configured}'
 echo 'Available hosts:'
 cat /etc/hosts | grep ha-cluster 2>/dev/null || echo "  (no ha-cluster hosts found)"
@@ -1718,15 +1682,10 @@ exec_in_namespace() {
     
     local user_name=$(id -un)
     local start_dir="$PWD"
-    
-    # Get the actual IP for this node from L3BGP configuration
-    local node_ip_var="node_${node_id}_ip"
-    local node_ip="${!node_ip_var:-${NETWORK_PREFIX}.${node_id}.1}"
-    
     sudo ip netns exec "$netns" sudo -u "$user_name" bash -c "
         $env_source
         cd '$start_dir'
-        export NCS_IPC_ADDR=$node_ip
+        export NCS_IPC_ADDR=${NETWORK_PREFIX}.${node_id}.1
         $cmd
     "
 }
@@ -1966,7 +1925,7 @@ run_interactive_config() {
     if [[ "$type_choice" == "2" ]]; then
         config_type="l3bgp"
     fi
-
+    
     if [[ "$config_type" == "simple" ]]; then
         create_interactive_simple_config "$output_file" "$num_nodes" "$cluster_name" "$prefix"
     else
@@ -2006,7 +1965,7 @@ ssl_enabled=true
 ssl_cert_dir=
 ncs_flags=
 host=localhost.localdomain
-env_sh_path=$ENV_SH_PATH
+env_sh_path=$(pwd)/env.sh
 
 # Timeouts
 timeout=30
@@ -2115,7 +2074,7 @@ ssl_enabled=true
 ssl_cert_dir=
 ncs_flags=
 host=localhost.localdomain
-env_sh_path=$ENV_SH_PATH
+env_sh_path=$(pwd)/env.sh
 
 # Timeouts
 timeout=30
