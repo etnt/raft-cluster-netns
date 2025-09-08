@@ -306,7 +306,8 @@ EOF
     for ((j=1; j<=NODES; j++)); do
         local node_ip="$(get_node_ip "$j")"
         local node_hostname="$(get_node_hostname "$j")"
-        echo "$node_ip    $node_hostname" >> "$hosts_file"
+        local nso_hostname="${PREFIX}${j}.ha-cluster"
+        echo "$node_ip    $node_hostname $nso_hostname" >> "$hosts_file"
     done
     
     # Add manager if enabled
