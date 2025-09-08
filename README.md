@@ -761,6 +761,116 @@ journalctl -u systemd-networkd
 dmesg | grep -i network
 ```
 
+### L3BGP Network Connectivity Issues
+
+#### Bridge netfilter blocking traffic
+**Problem**: Bridge traffic being filtered by iptables, causing connectivity failures  
+**Symptoms**: `ping` works between some interfaces but fails between network namespaces  
+**Solution**: Disable bridge netfilter to allow unrestricted bridge traffic
+```bash
+# Disable bridge netfilter (applies iptables rules to bridge traffic)
+sudo sysctl -w net.bridge.bridge-nf-call-iptables=0
+sudo sysctl -w net.bridge.bridge-nf-call-ip6tables=0
+
+# Make permanent by adding to /etc/sysctl.conf:
+echo "net.bridge.bridge-nf-call-iptables=0" | sudo tee -a /etc/sysctl.conf
+echo "net.bridge.bridge-nf-call-ip6tables=0" | sudo tee -a /etc/sysctl.conf
+```
+
+#### iptables FORWARD policy blocking inter-subnet communication
+**Problem**: Default FORWARD policy DROP prevents routing between L3BGP subnets  
+**Symptoms**: 
+- Nodes can reach bridge gateway (`192.168.X.254`)
+- Cross-subnet communication fails (`192.168.30.97` → `192.168.31.98`)
+- `traceroute` shows first hop working, then `* * *`
+**Solution**: Add iptables rule to allow forwarding on bridge interface
+```bash
+# Allow forwarding between interfaces on the same bridge
+sudo iptables -I FORWARD -i ha-cluster -o ha-cluster -j ACCEPT
+
+# Or temporarily change policy (less secure)
+sudo iptables --policy FORWARD ACCEPT
+
+# Check current FORWARD policy
+sudo iptables -L FORWARD -n -v | head -1
+```
+
+#### L3BGP configuration using default values instead of config file
+**Problem**: Configuration parsing not loading node-specific variables  
+**Symptoms**: 
+- Parsed config shows `IP=192.168.1.1` instead of configured `IP=192.168.30.97`
+- Manager connectivity fails to wrong IP addresses
+**Solution**: Ensure config loading uses global variable scope
+```bash
+# Check if node variables are being set correctly
+grep "node_1_ip" your-config.conf
+
+# Verify the declare statement uses -g flag in load_config_file()
+# In raft-cluster-netns.sh, ensure:
+declare -g "$key=$value"  # Instead of just: declare "$key=$value"
+```
+
+#### Missing test_connectivity function
+**Problem**: Script calls undefined function  
+**Symptoms**: `./script.sh test` fails with "command not found"  
+**Solution**: Function should route to appropriate network module
+```bash
+# Function should be implemented as:
+test_connectivity() {
+    if [[ "$NETWORK_TYPE" == "l3bgp" ]]; then
+        source "$SCRIPT_DIR/lib/network-l3bgp.sh"
+        parse_l3bgp_config  # Important: parse config first
+        test_l3bgp_connectivity
+    else
+        # Handle simple network testing
+    fi
+}
+```
+
+#### Hard-coded subnet logic in L3BGP module
+**Problem**: L3BGP setup uses default subnets (1, 2, 3) instead of configured subnets  
+**Symptoms**: Bridge shows `192.168.1.254`, `192.168.2.254` instead of `192.168.30.254`, `192.168.31.254`  
+**Solution**: Use actual configured subnets in routing and bridge setup
+```bash
+# Check bridge gateway addresses
+ip addr show ha-cluster | grep inet
+
+# Should show configured subnets like:
+# inet 192.168.30.254/24 scope global ha-cluster
+# inet 192.168.31.254/24 scope global ha-cluster
+# Not: inet 192.168.1.254/24, inet 192.168.2.254/24
+```
+
+#### Debugging network connectivity step by step
+```bash
+# 1. Test basic namespace connectivity
+sudo ip netns list | grep l3bgp
+
+# 2. Test bridge gateway reachability
+sudo ip netns exec l3bgp1ns ping -c 1 192.168.30.254
+
+# 3. Test host-to-manager connectivity
+ping -c 1 192.168.30.2
+
+# 4. Check ARP tables
+sudo ip netns exec l3bgp1ns ip neighbor show
+
+# 5. Test cross-subnet routing
+sudo ip netns exec l3bgp1ns ping -c 1 192.168.31.98
+
+# 6. Check bridge netfilter settings
+sudo sysctl net.bridge.bridge-nf-call-iptables
+
+# 7. Check iptables FORWARD policy
+sudo iptables -L FORWARD -n | head -1
+
+# 8. Verify routing table
+sudo ip netns exec l3bgp1ns ip route show
+
+# 9. Test full connectivity
+./raft-cluster-netns.sh test -c your-config.conf
+```
+
 ## Advanced Features
 
 ### Custom SSL Certificates

@@ -108,7 +108,8 @@ load_config_file() {
             manager_ip) MANAGER_IP="$value" ;;
             node_*) 
                 # Handle node-specific configuration (e.g., node_1_ip, node_1_hostname)
-                declare "$key=$value"
+                log_debug "Setting node variable: $key=$value"
+                declare -g "$key=$value"
                 ;;
         esac
     done < "$config_file"
@@ -381,6 +382,24 @@ check_prerequisites() {
 # - create_namespaces() / delete_namespaces()
 # - setup_bridge() / cleanup_bridge()
 # - validate_network() / test_connectivity()
+
+# Test network connectivity (routes to appropriate network module)
+test_connectivity() {
+    log_info "Testing network connectivity..."
+    
+    # Load appropriate network module and call its test function
+    if [[ "$NETWORK_TYPE" == "l3bgp" ]]; then
+        source "$SCRIPT_DIR/lib/network-l3bgp.sh"
+        # Parse L3BGP configuration first
+        parse_l3bgp_config
+        test_l3bgp_connectivity
+    else
+        source "$SCRIPT_DIR/lib/network-simple.sh"
+        # Add call to simple network test function when it exists
+        log_warn "Simple network connectivity testing not yet implemented"
+        return 0
+    fi
+}
 
 # Isolate a single node from the cluster (simulate cable disconnect)
 isolate_node() {

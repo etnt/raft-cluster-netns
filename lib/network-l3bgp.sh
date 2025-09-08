@@ -408,12 +408,15 @@ create_l3bgp_namespaces() {
         
         # Add routing for L3BGP topology
         # Each node needs to know how to reach other subnets through the bridge
-        local gateway_ip="192.168.${i}.254"
+        local node_subnet="$(get_node_subnet "$i")"
+        local subnet_prefix=$(echo "$node_subnet" | cut -d'/' -f1 | cut -d'.' -f1-3)
+        local gateway_ip="${subnet_prefix}.254"
         
         # Add routes to other node subnets
         for ((j=1; j<=NODES; j++)); do
             if [[ $j -ne $i ]]; then
-                execute_cmd "sudo ip -n $netns route add 192.168.${j}.0/24 via $gateway_ip dev $veth_a"
+                local target_subnet="$(get_node_subnet "$j")"
+                execute_cmd "sudo ip -n $netns route add $target_subnet via $gateway_ip dev $veth_a"
             fi
         done
         
@@ -458,7 +461,9 @@ setup_l3bgp_bridges() {
     
     # Add gateway IPs for each L3BGP subnet
     for ((i=1; i<=NODES; i++)); do
-        local subnet_gateway="${NETWORK_PREFIX}.${i}.254"
+        local node_subnet="$(get_node_subnet "$i")"
+        local subnet_prefix=$(echo "$node_subnet" | cut -d'/' -f1 | cut -d'.' -f1-3)
+        local subnet_gateway="${subnet_prefix}.254"
         execute_cmd "sudo ip addr add ${subnet_gateway}/24 dev $BRIDGE_NAME"
         log_debug "Added L3BGP gateway: ${subnet_gateway}/24"
     done
@@ -840,7 +845,10 @@ test_l3bgp_connectivity() {
         # Test ping to manager if enabled
         if [[ "$MANAGER_ENABLED" == "true" ]]; then
             # In hub-and-spoke topology, nodes reach manager via subnet-specific address
-            local manager_subnet_ip="192.168.${i}.2"
+            # Calculate manager IP based on node's actual subnet
+            local node_subnet="$(get_node_subnet "$i")"
+            local subnet_prefix=$(echo "$node_subnet" | cut -d'/' -f1 | cut -d'.' -f1-3)
+            local manager_subnet_ip="${subnet_prefix}.2"
             log_debug "Testing ping from $node_hostname to manager ($manager_subnet_ip)"
             if ! execute_cmd "sudo ip netns exec $netns ping -c 1 -W 2 $manager_subnet_ip"; then
                 log_error "Ping failed from $node_hostname to manager"
