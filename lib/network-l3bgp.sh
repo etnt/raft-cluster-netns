@@ -791,6 +791,11 @@ start_gobgp_daemons() {
     fi
     
     log_info "All GoBGP daemons started successfully"
+    
+    # The gobgpd output is messing with the terminal, so reset it!
+    stty sane  # restore sane tty settings
+    echo
+    
 }
 
 # Validate L3BGP network
