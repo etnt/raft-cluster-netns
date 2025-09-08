@@ -662,7 +662,10 @@ create_node_gobgp_config() {
 
     # Each node peers only with the manager (hub-and-spoke topology)
     # In this topology, nodes connect to manager using manager's subnet-specific address
-    local manager_subnet_ip="192.168.${node_id}.2"
+    # Calculate manager IP based on node's actual subnet
+    local node_subnet="$(get_node_subnet "$node_id")"
+    local subnet_prefix=$(echo "$node_subnet" | cut -d'/' -f1 | cut -d'.' -f1-3)
+    local manager_subnet_ip="${subnet_prefix}.2"
     local zebra_socket="/var/run/frr-${PREFIX}${node_id}ns/zserv.api"
     
     cat > "$config_file" << EOF
