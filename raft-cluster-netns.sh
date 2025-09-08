@@ -607,7 +607,7 @@ show_partition_status() {
         printf "%8s" "Node$j"
     done
     echo ""
-    
+
     # Test connectivity between all pairs
     for ((i=1; i<=NODES; i++)); do
         local netns_i="${PREFIX}${i}ns"
@@ -617,7 +617,17 @@ show_partition_status() {
             if [[ "$i" == "$j" ]]; then
                 printf "%8s" "SELF"
             else
-                local target_ip="${NETWORK_PREFIX}.${j}.1"
+                local target_ip
+                if [[ "$NETWORK_TYPE" == "l3bgp" ]]; then
+                    # For L3BGP, get the actual node IP from configuration
+                    target_ip=$(eval echo "\$NODE_${j}_IP")
+                    if [[ -z "$target_ip" ]]; then
+                        target_ip="${NETWORK_PREFIX}.${j}.1"  # fallback
+                    fi
+                else
+                    target_ip="${NETWORK_PREFIX}.${j}.1"
+                fi
+                
                 if sudo ip netns exec "$netns_i" ping -c 1 -W 1 "$target_ip" >/dev/null 2>&1; then
                     printf "%8s" "✓"
                 else
@@ -1556,6 +1566,11 @@ parse_args() {
             cleanup_environment
             ;;
         status)
+            # Parse L3BGP config if needed for proper status display
+            if [[ "$NETWORK_TYPE" == "l3bgp" ]]; then
+                source "$SCRIPT_DIR/lib/network-l3bgp.sh"
+                parse_l3bgp_config
+            fi
             show_status
             ;;
         shell)
@@ -1636,6 +1651,16 @@ show_status() {
             echo -e "    $netns: ${RED}MISSING${NC}"
         fi
     done
+    
+    # Show manager namespace for L3BGP
+    if [[ "$NETWORK_TYPE" == "l3bgp" ]]; then
+        local mgr_ns="${PREFIX}manager"
+        if ip netns list | grep -q "^$mgr_ns"; then
+            echo -e "    $mgr_ns: ${GREEN}EXISTS${NC}"
+        else
+            echo -e "    $mgr_ns: ${RED}MISSING${NC}"
+        fi
+    fi
     
     echo ""
     show_nso_status
