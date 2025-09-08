@@ -221,6 +221,83 @@ export ENV_SH_PATH="/path/to/your/env.sh"
 | `-v, --verbose` | Verbose output | - |
 | `-c, --config` | Configuration file | .raft-cluster.conf |
 
+
+## Troubleshooting: Downgrading GoBGP and FRR
+
+Newer versions of GoBGP (≥ 3.x) and FRR (≥ 8.4.x) introduced changes in
+the Zebra protocol message formats. We simply didn't see a success
+message in the output when starting gobgpd, like in:
+
+```
+{"Topic":"Zebra","level":"info","msg":"success to connect to Zebra with message
+ version 6.","time":"2025-09-08T21:36:29+02:00"}
+```
+
+To maintain compatibility in this example setup using Linux namespaces
+and Zebra, it is recommended to use GoBGP 2.25.0 and FRR 8.1, which are known
+to work together correctly.
+
+First check what versions you have:
+
+```bash
+gobgpd --version   # GoBGP version
+vtysh --help       # FRR version
+```
+
+### Steps to Downgrade
+
+1. Remove the current FRR and GoBGP packages:
+
+```bash
+sudo apt-get remove --purge frr frr-pythontools gobgpd
+sudo apt-get autoremove
+```
+
+2. Install required dependencies:
+
+```bash
+sudo apt-get update
+sudo apt-get install -y git build-essential pkg-config libjson-c-dev \
+     libelf-dev libyang2-dev autoconf automake libtool golang
+```
+
+3. Build and install FRR 8.1 from source:
+
+```bash
+git clone https://github.com/FRRouting/frr.git
+cd frr
+git checkout v8.1
+./bootstrap.sh
+./configure \
+  --prefix=/usr \
+  --sysconfdir=/etc/frr \
+  --sbindir=/usr/lib/frr \
+  --localstatedir=/var/run/frr
+make
+sudo make install
+```
+
+4. Install GoBGP 2.25.0:
+
+```bash
+git clone https://github.com/osrg/gobgp.git
+cd gobgp
+git checkout v2.25.0
+# Installs in $HOME/go/bin
+go install ./cmd/gobgpd
+go install ./cmd/gobgp
+# Make globally available
+sudo cp ${HOME}/go/bin/gobgpd /usr/local/bin
+sudo cp ${HOME}/go/bin/gobgp /usr/local/bin
+```
+
+5. Verify versions:
+
+```bash
+gobgpd --version   # should show 2.25.0
+vtysh --help       # should show FRR 8.1
+```
+
 ## Network Partition Testing
 
 ### Overview
