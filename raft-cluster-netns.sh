@@ -785,11 +785,22 @@ cleanup_ssl_certificates() {
 setup_nso_node() {
     local node_id="$1"
     local node_dir="${WORK_DIR}/ncs-run${node_id}"
-    local node_ip="${NETWORK_PREFIX}.${node_id}.1"
+    local node_ip
+    
+    # Use L3BGP node IP if configured, otherwise fall back to simple addressing
+    if [[ "$NETWORK_TYPE" == "l3bgp" ]]; then
+        node_ip=$(eval echo "\$NODE_${node_id}_IP")
+        if [[ -z "$node_ip" ]]; then
+            node_ip="${NETWORK_PREFIX}.${node_id}.1"  # fallback
+        fi
+    else
+        node_ip="${NETWORK_PREFIX}.${node_id}.1"
+    fi
+    
     local node_address="ncsd${node_id}@${PREFIX}${node_id}.ha-cluster"
     local seed_address=$(get_seed_node_address "$node_id")
     local env_source=$(get_nso_env_source)
-    
+
     log_debug "Setting up NSO node $node_id in $node_dir"
     log_debug "ENV_SH_PATH: '$ENV_SH_PATH'"
     log_debug "env_source: '$env_source'"
@@ -863,11 +874,14 @@ apply_basic_nso_config() {
     
     # Backup original config
     execute_cmd "cp $ncs_conf ${ncs_conf}.bk"
-    
+
     # Apply sed transformations for basic config  
+    # Replace both 0.0.0.0 and hardcoded simple network IPs with actual node IP
+    local simple_ip="${NETWORK_PREFIX}.${node_id}.1"
     execute_cmd "sed -i \\
         -e '/<webui>/,/<\\/webui>/ s|<enabled>true</enabled>|<enabled>false</enabled>|' \\
         -e 's/0\\.0\\.0\\.0/${node_ip}/g' \\
+        -e 's/${simple_ip//./\\.}/${node_ip}/g' \\
         -e 's|<cli>|<cli><default-table-behavior>dynamic</default-table-behavior>|g' \\
         -e 's|</ncs-config>|<ncs-ipc-address><ip>${node_ip}</ip></ncs-ipc-address>\\n&|' \\
         \"$ncs_conf\""
@@ -985,16 +999,28 @@ start_nso_node() {
     local node_id="$1"
     local node_dir="${WORK_DIR}/ncs-run${node_id}"
     local netns="${PREFIX}${node_id}ns"
-    local node_ip="${NETWORK_PREFIX}.${node_id}.1"
-    local env_source=$(get_nso_env_source)
+    local node_ip
     
+    # Use L3BGP node IP if configured, otherwise fall back to simple addressing
+    if [[ "$NETWORK_TYPE" == "l3bgp" ]]; then
+        node_ip=$(eval echo "\$NODE_${node_id}_IP")
+        if [[ -z "$node_ip" ]]; then
+            log_error "L3BGP node IP not found for node $node_id. Ensure L3BGP config is parsed."
+            return 1
+        fi
+    else
+        node_ip="${NETWORK_PREFIX}.${node_id}.1"
+    fi
+    
+    local env_source=$(get_nso_env_source)
+
     if [[ ! -d "$node_dir" ]]; then
         log_error "NSO node directory does not exist: $node_dir"
         return 1
     fi
-    
-    log_debug "Starting NSO node $node_id in namespace $netns"
-    
+
+    log_debug "Starting NSO node $node_id in namespace $netns (IP: $node_ip)"
+
     # Start NCS in the namespace (with environment sourced, as local user)
     local user_name=$(id -un)
     execute_cmd "sudo ip netns exec $netns sudo -u $user_name bash -c '
@@ -1031,7 +1057,18 @@ start_nso_nodes() {
 # Stop a single NSO node
 stop_nso_node() {
     local node_id="$1"
-    local node_ip="${NETWORK_PREFIX}.${node_id}.1"
+    local node_ip
+    
+    # Use L3BGP node IP if configured, otherwise fall back to simple addressing  
+    if [[ "$NETWORK_TYPE" == "l3bgp" ]]; then
+        node_ip=$(eval echo "\$NODE_${node_id}_IP")
+        if [[ -z "$node_ip" ]]; then
+            node_ip="${NETWORK_PREFIX}.${node_id}.1"  # fallback
+        fi
+    else
+        node_ip="${NETWORK_PREFIX}.${node_id}.1"
+    fi
+    
     local netns="${PREFIX}${node_id}ns"
     local env_source=$(get_nso_env_source)
     
@@ -1119,24 +1156,35 @@ cleanup_nso_nodes() {
 # Check NSO node status
 check_nso_node_status() {
     local node_id="$1"
-    local node_ip="${NETWORK_PREFIX}.${node_id}.1"
+    local node_ip
+    
+    # Use L3BGP node IP if configured, otherwise fall back to simple addressing
+    if [[ "$NETWORK_TYPE" == "l3bgp" ]]; then
+        node_ip=$(eval echo "\$NODE_${node_id}_IP")
+        if [[ -z "$node_ip" ]]; then
+            node_ip="${NETWORK_PREFIX}.${node_id}.1"  # fallback
+        fi
+    else
+        node_ip="${NETWORK_PREFIX}.${node_id}.1"
+    fi
+    
     local netns="${PREFIX}${node_id}ns"
     local env_source=$(get_nso_env_source)
-    
+
     # Check if NSO process is running
     local pids=$(sudo ip netns exec "$netns" pgrep -f "beam.*ncs" 2>/dev/null || true)
     if [[ -z "$pids" ]]; then
         echo "STOPPED"
         return
     fi
-    
+
     # Try to get RAFT role
     local role=$(sudo ip netns exec "$netns" bash -c "
         $env_source
         export NCS_IPC_ADDR=$node_ip
         timeout 5 ncs_cmd -I -c 'mget /ha-raft/status/role' 2>/dev/null || echo 'unknown'
     ")
-    
+
     echo "RUNNING ($role)"
 }
 
@@ -1163,21 +1211,39 @@ show_nso_status() {
     echo ""
     echo "  RAFT Status:"
     local env_source=$(get_nso_env_source)
+    local found_leader=false
+    
     for ((i=1; i<=NODES; i++)); do
-        local node_ip="${NETWORK_PREFIX}.${i}.1"
-        local netns="${PREFIX}${i}ns"
+        local node_ip
         
+        # Use L3BGP node IP if configured, otherwise fall back to simple addressing
+        if [[ "$NETWORK_TYPE" == "l3bgp" ]]; then
+            node_ip=$(eval echo "\$NODE_${i}_IP")
+            if [[ -z "$node_ip" ]]; then
+                node_ip="${NETWORK_PREFIX}.${i}.1"  # fallback
+            fi
+        else
+            node_ip="${NETWORK_PREFIX}.${i}.1"
+        fi
+        
+        local netns="${PREFIX}${i}ns"
+
         local leader=$(sudo ip netns exec "$netns" bash -c "
             $env_source
             export NCS_IPC_ADDR=$node_ip
             timeout 5 ncs_cmd -I -c 'mget /ha-raft/status/leader' 2>/dev/null || echo 'unknown'
         " 2>/dev/null || echo "unknown")
-        
-        if [[ "$leader" != "unknown" ]] && [[ "$leader" != "error" ]]; then
+
+        if [[ "$leader" != "unknown" ]] && [[ "$leader" != "error" ]] && [[ -n "$leader" ]]; then
             echo "    Leader (from node $i): $leader"
+            found_leader=true
             break
         fi
     done
+    
+    if [[ "$found_leader" == "false" ]]; then
+        echo "    No leader found - cluster may be initializing or all nodes stalled"
+    fi
 }
 
 # Setup complete network infrastructure
@@ -1496,9 +1562,22 @@ parse_args() {
                     SPECIFIC_NODE="$1"
                     shift
                     if [[ "$command" == "exec" ]] && [[ $# -gt 0 ]]; then
-                        # Remaining args are the command to execute
-                        EXEC_COMMAND="$*"
-                        break
+                        # Collect command arguments until we hit a global option
+                        local cmd_args=()
+                        while [[ $# -gt 0 ]]; do
+                            case "$1" in
+                                -c|--config|-v|--verbose|-h|--help|--dry-run)
+                                    # This is a global option, stop collecting command args
+                                    break
+                                    ;;
+                                *)
+                                    # This is part of the command to execute
+                                    cmd_args+=("$1")
+                                    shift
+                                    ;;
+                            esac
+                        done
+                        EXEC_COMMAND="${cmd_args[*]}"
                     fi
                 elif [[ "$command" == "start" ]] || [[ "$command" == "stop" ]] || [[ "$command" == "isolate" ]] || [[ "$command" == "heal" ]]; then
                     # Optional node ID for these commands
@@ -1557,12 +1636,27 @@ parse_args() {
             setup_environment
             ;;
         start)
+            # Parse L3BGP config if needed for proper IP addressing
+            if [[ "$NETWORK_TYPE" == "l3bgp" ]]; then
+                source "$SCRIPT_DIR/lib/network-l3bgp.sh"
+                parse_l3bgp_config
+            fi
             start_nso_nodes
             ;;
         stop)
+            # Parse L3BGP config if needed for proper IP addressing
+            if [[ "$NETWORK_TYPE" == "l3bgp" ]]; then
+                source "$SCRIPT_DIR/lib/network-l3bgp.sh"
+                parse_l3bgp_config
+            fi
             stop_nso_nodes
             ;;
         cleanup)
+            # Parse L3BGP config if needed for proper IP addressing
+            if [[ "$NETWORK_TYPE" == "l3bgp" ]]; then
+                source "$SCRIPT_DIR/lib/network-l3bgp.sh"
+                parse_l3bgp_config
+            fi
             cleanup_environment
             ;;
         status)
@@ -1578,12 +1672,22 @@ parse_args() {
                 log_error "Node ID required for shell command"
                 exit 1
             fi
+            # Parse L3BGP config if needed for proper IP addressing
+            if [[ "$NETWORK_TYPE" == "l3bgp" ]]; then
+                source "$SCRIPT_DIR/lib/network-l3bgp.sh"
+                parse_l3bgp_config
+            fi
             enter_namespace_shell "$SPECIFIC_NODE"
             ;;
         exec)
             if [[ -z "$SPECIFIC_NODE" ]] || [[ -z "${EXEC_COMMAND:-}" ]]; then
                 log_error "Node ID and command required for exec"
                 exit 1
+            fi
+            # Parse L3BGP config if needed for proper IP addressing
+            if [[ "$NETWORK_TYPE" == "l3bgp" ]]; then
+                source "$SCRIPT_DIR/lib/network-l3bgp.sh"
+                parse_l3bgp_config
             fi
             exec_in_namespace "$SPECIFIC_NODE" "$EXEC_COMMAND"
             ;;
@@ -1675,18 +1779,29 @@ enter_namespace_shell() {
     local netns="${PREFIX}${node_id}ns"
     local env_source=$(get_nso_env_source)
     
+    # Calculate node IP based on network type
+    local node_ip
+    if [[ "$NETWORK_TYPE" == "l3bgp" ]]; then
+        node_ip=$(eval echo "\$NODE_${node_id}_IP")
+        if [[ -z "$node_ip" ]]; then
+            node_ip="${NETWORK_PREFIX}.${node_id}.1"  # fallback
+        fi
+    else
+        node_ip="${NETWORK_PREFIX}.${node_id}.1"
+    fi
+
     if ! ip netns list | grep -q "^$netns"; then
         log_error "Namespace $netns does not exist"
         exit 1
     fi
-    
+
     log_info "Entering shell for namespace $netns"
     log_info "Use 'exit' to return to host shell"
-    
+
     local user_name=$(id -un)
     local user_home=$(getent passwd "$user_name" | cut -d: -f6)
     local start_dir="$PWD"
-    
+
     # Create a temporary init file for the shell
     local init_file=$(mktemp)
     cat > "$init_file" << EOF
@@ -1694,9 +1809,9 @@ enter_namespace_shell() {
 $env_source
 cd '$start_dir'
 export PS1='[$netns] \u@\h:\w$ '
-export NCS_IPC_ADDR=${NETWORK_PREFIX}.${node_id}.1
+export NCS_IPC_ADDR=$node_ip
 echo 'Namespace: $netns'
-echo 'Node IP: ${NETWORK_PREFIX}.${node_id}.1'
+echo 'Node IP: $node_ip'
 echo 'NSO Environment: ${ENV_SH_PATH:-not configured}'
 echo 'Available hosts:'
 cat /etc/hosts | grep ha-cluster 2>/dev/null || echo "  (no ha-cluster hosts found)"
@@ -1717,19 +1832,30 @@ exec_in_namespace() {
     local netns="${PREFIX}${node_id}ns"
     local env_source=$(get_nso_env_source)
     
+    # Calculate node IP based on network type
+    local node_ip
+    if [[ "$NETWORK_TYPE" == "l3bgp" ]]; then
+        node_ip=$(eval echo "\$NODE_${node_id}_IP")
+        if [[ -z "$node_ip" ]]; then
+            node_ip="${NETWORK_PREFIX}.${node_id}.1"  # fallback
+        fi
+    else
+        node_ip="${NETWORK_PREFIX}.${node_id}.1"
+    fi
+
     if ! ip netns list | grep -q "^$netns"; then
         log_error "Namespace $netns does not exist"
         exit 1
     fi
-    
+
     log_debug "Executing in $netns: $cmd"
-    
+
     local user_name=$(id -un)
     local start_dir="$PWD"
     sudo ip netns exec "$netns" sudo -u "$user_name" bash -c "
         $env_source
         cd '$start_dir'
-        export NCS_IPC_ADDR=${NETWORK_PREFIX}.${node_id}.1
+        export NCS_IPC_ADDR=$node_ip
         $cmd
     "
 }
