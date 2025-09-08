@@ -229,6 +229,7 @@ wait_for_zebra() {
     local sock="$2"
     local retries=10
     local wait=0.5
+    local i
 
     log_debug "Waiting for zebra socket $sock in namespace $ns..."
     
@@ -259,6 +260,7 @@ wait_for_gobgp_zebra() {
     local log_file="$2"
     local retries=30
     local wait=0.5
+    local i
     
     log_debug "Waiting for GoBGP-Zebra connection in namespace $ns..."
     
@@ -741,6 +743,9 @@ start_gobgp_daemons() {
     log_info "Starting GoBGP daemons..."
     
     local gobgp_dir="${WORK_DIR}/gobgp"
+    
+    # Debug: Show NODES value and loop range
+    log_debug "NODES=$NODES, starting GoBGP daemon loop from 1 to $NODES"
     
     # Start gobgpd in each node namespace
     for ((i=1; i<=NODES; i++)); do
