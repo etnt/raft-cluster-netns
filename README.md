@@ -1,58 +1,31 @@
 # RAFT Cluster Virtual Network Setup
 
-This script provides a complete solution for setting up isolated virtual network environments for NSO RAFT cluster testing. It creates network namespaces, configures virtual networking, and sets up NSO instances for realistic cluster testing scenarios.
+This script provides a complete solution for setting up isolated virtual network
+environments for NSO RAFT cluster testing. It creates network namespaces,
+configures virtual networking, and sets up NSO instances for realistic cluster
+testing scenarios.
 
 ## Overview
 
-The `raft-cluster-netns.sh` script automates the creation of complete NSO RAFT cluster testing environments using Linux network namespaces. It provides:
+The `raft-cluster-netns.sh` script automates the creation of complete NSO RAFT
+cluster testing environments using Linux network namespaces. It provides:
 
 - **Virtual Network Infrastructure**: Isolated network namespaces with bridge networking
 - **NSO Cluster Configuration**: Complete RAFT setup with SSL/TLS enabled by default  
-- **Development Tools**: Testing, debugging, and partition simulation capabilities
-
-## Features
-
-### 🚀 **Complete Environment Setup**
-- Automated network namespace creation with proper isolation
-- Bridge networking for inter-node communication
-- Hostname resolution with custom hosts files
-- NSO runtime directory setup with RAFT configuration
-
-### 🔧 **Advanced Configuration**
-- Configuration file support for persistent settings
-- **SSL/TLS enabled by default** for secure Erlang distribution
-- Optional SSL disabling with `--no-ssl` for testing scenarios
-- Customizable cluster sizes (3-N nodes)
-- Flexible network addressing schemes
-- **L3 BGP topology support** with custom subnets and ASNs
-- **Tailf-HCC topology support** with manager-only BGP routing
-- Auto-generation of realistic multi-location network topologies
-
-### 🛠️ **Management & Debugging**
-- Interactive namespace shells for debugging
-- Command execution in specific namespaces
-- Network connectivity testing
-- Comprehensive status reporting
-
-### 🔥 **Network Partition Simulation**
-- Single node isolation (simulate cable disconnect)
-- Multi-node network partitions (split-brain scenarios)
-- Dynamic partition creation and healing
-- Connectivity matrix visualization
-- RAFT behavior testing under network failures
-
-### 🎯 **Developer-Friendly**
-- Dry-run mode for testing configurations
-- Verbose logging for troubleshooting
-- Force cleanup options for development
-- Configuration persistence across sessions
+- **Tailf-hcc**: Prepared for running BGP advertisment using the tailf-hcc package
+- **Network Partition Simulation**: Test split-brain scenarios with node isolation and healing
+- **Management & Debugging**: Interactive shells, command execution, and comprehensive status reporting
+- **Developer-Friendly**: Dry-run mode, verbose logging, and configuration persistence
 
 ## Quick Start
 
 ### Basic Setup
 
 ```bash
-# Setup a basic 3-node RAFT cluster
+# Create (default) config file: .raft_cluster.conf
+./raft-cluster-netns.sh configure --auto --type tailf_hcc
+
+# Setup a RAFT cluster according to (default) config file
 ./raft-cluster-netns.sh setup
 
 # Check cluster status
@@ -64,6 +37,19 @@ The `raft-cluster-netns.sh` script automates the creation of complete NSO RAFT c
 # Start NSO nodes
 ./raft-cluster-netns.sh start
 
+# Enter a bash shell on node 1
+./raft-cluster-netns.sh shell 1
+
+# Run command  to enter NSO CLI on node 1
+./raft-cluster-netns.sh exec 1 "ncs_cli -u admin"
+
+# Create HA-Raft cluster from node 1
+./raft-cluster-netns.sh exec 1 'ncs_cmd -c "maction /ha-raft/create-cluster member [ ncsd2@tailf_hcc2.ha-cluster ncsd3@tailf_hcc3.ha-cluster ]"'
+
+# Get HA-Raft leader from node 1
+./raft-cluster-netns.sh exec 1 'ncs_cmd -I -c "mget /ha-raft/status/leader"'
+
+
 # Simulate network failures
 ./raft-cluster-netns.sh isolate 1          # Isolate node 1
 ./raft-cluster-netns.sh partition 1,2      # Create 2-node partition 
@@ -71,53 +57,10 @@ The `raft-cluster-netns.sh` script automates the creation of complete NSO RAFT c
 
 # Clean up everything
 ./raft-cluster-netns.sh cleanup --force
+
+# Get help
+./raft-cluster-netns.sh help
 ```
-
-### Configure Without Network Setup
-
-```bash
-# Configure NSO nodes using existing network setup
-./raft-cluster-netns.sh configure
-
-# Configure with SSL disabled (SSL is enabled by default)
-./raft-cluster-netns.sh configure --no-ssl
-
-# Configure with specific cluster settings
-./raft-cluster-netns.sh configure --cluster-name "my-cluster" -n 5
-```
-
-The `configure` command is useful when:
-- You want to reconfigure NSO nodes without recreating the network
-- Testing different NSO configurations with the same network setup
-- Applying SSL/TLS configuration to an existing cluster
-- Changing cluster settings like cluster name or node count
-
-### L3 BGP Topology Configuration
-
-The script supports advanced L3 BGP topology generation for testing complex network scenarios:
-
-```bash
-# Generate L3 BGP configuration file
-./raft-cluster-netns.sh configure --auto --type l3bgp -n 5
-
-# Setup cluster using the generated BGP configuration
-./raft-cluster-netns.sh setup -c .raft-cluster.conf
-```
-
-**L3 BGP features:**
-- **Realistic Network Topologies**: Auto-generates configurations with city-based node names (Berlin, London, Paris, Tokyo, Sydney)
-- **Unique Subnets**: Each node gets its own subnet for true L3 separation
-- **BGP ASN Assignment**: Automatic ASN allocation for BGP peering
-- **Full Mesh Connectivity**: BGP peering relationships between all nodes
-- **Manager Node**: Centralized management node with direct connections
-- **Production-Like Testing**: Simulates real-world distributed environments
-
-**Generated BGP configuration includes:**
-- Node-specific IP subnets (e.g., 192.168.30.0/24 for Berlin)
-- Unique ASN numbers (e.g., AS64511 for Berlin, AS64512 for London)
-- BGP router IDs based on geographic locations
-- Inter-node BGP peering configurations
-- Hostname resolution for realistic multi-site scenarios
 
 ### Tailf-HCC Topology Configuration
 
@@ -144,27 +87,32 @@ The script also supports a Tailf-HCC topology designed for scenarios where BGP r
 - Direct routing from worker nodes to manager
 - Full network connectivity without worker-node routing complexity
 
-### Advanced Setup
+### L3 BGP Topology Configuration
+
+The script supports advanced L3 BGP topology generation for testing complex network scenarios:
 
 ```bash
-# Setup 5-node cluster (SSL enabled by default)
-./raft-cluster-netns.sh setup -n 5 --cluster-name "production-cluster"
-
-# Setup with SSL disabled (if needed for testing)
-./raft-cluster-netns.sh setup --no-ssl
-
-# Setup with custom network addressing
-./raft-cluster-netns.sh setup --network-prefix "10.0" --bridge-name "prod-cluster"
-
-# Network-only setup (skip NSO configuration)
-./raft-cluster-netns.sh setup --no-nso
-
-# Generate L3 BGP configuration with auto-generated topology
+# Generate L3 BGP configuration file
 ./raft-cluster-netns.sh configure --auto --type l3bgp -n 5
 
-# Setup cluster using L3 BGP configuration
-./raft-cluster-netns.sh setup -c .raft-cluster.conf
+# Setup cluster using the generated BGP configuration
+./raft-cluster-netns.sh setup
 ```
+
+**L3 BGP features:**
+- **Realistic Network Topologies**: Auto-generates configurations with city-based node names (Berlin, London, Paris, Tokyo, Sydney)
+- **Unique Subnets**: Each node gets its own subnet for true L3 separation
+- **BGP ASN Assignment**: Automatic ASN allocation for BGP peering
+- **Full Mesh Connectivity**: BGP peering relationships between all nodes
+- **Manager Node**: Centralized management node with direct connections
+- **Production-Like Testing**: Simulates real-world distributed environments
+
+**Generated BGP configuration includes:**
+- Node-specific IP subnets (e.g., 192.168.30.0/24 for Berlin)
+- Unique ASN numbers (e.g., AS64511 for Berlin, AS64512 for London)
+- BGP router IDs based on geographic locations
+- Inter-node BGP peering configurations
+- Hostname resolution for realistic multi-site scenarios
 
 ## Installation & Prerequisites
 
@@ -441,61 +389,6 @@ This shows nodes 1,2 can communicate with each other, but node 3 is isolated.
 ./raft-cluster-netns.sh heal
 ```
 
-### Advanced Testing Workflows
-
-#### **Chaos Testing**
-Simulate random network failures:
-
-```bash
-#!/bin/bash
-# Chaos testing script
-for i in {1..10}; do
-    echo "=== Chaos iteration $i ==="
-    
-    # Random partition
-    node=$((RANDOM % 3 + 1))
-    ./raft-cluster-netns.sh isolate $node
-    
-    # Wait and observe
-    sleep 10
-    ./raft-cluster-netns.sh status
-    
-    # Heal and repeat
-    ./raft-cluster-netns.sh heal
-    sleep 5
-done
-```
-
-#### **Graduated Partition Testing**
-Test different partition sizes:
-
-```bash
-# Test increasing partition sizes in 5-node cluster
-./raft-cluster-netns.sh setup -n 5
-./raft-cluster-netns.sh start
-
-# Test 1 vs 4
-./raft-cluster-netns.sh isolate 1
-./raft-cluster-netns.sh status && ./raft-cluster-netns.sh heal
-
-# Test 2 vs 3  
-./raft-cluster-netns.sh partition 1,2
-./raft-cluster-netns.sh status && ./raft-cluster-netns.sh heal
-
-# Test 3 vs 2 (majority vs minority)
-./raft-cluster-netns.sh partition 1,2,3
-./raft-cluster-netns.sh status && ./raft-cluster-netns.sh heal
-```
-
-### RAFT Behavior Expectations
-
-| Scenario | Expected Behavior |
-|----------|-------------------|
-| **1 vs 2 partition** | Majority (2 nodes) elects leader, minority (1 node) stays follower |
-| **2 vs 2 partition** | No new leader election possible, cluster becomes unavailable |
-| **Leader isolation** | Remaining nodes elect new leader, isolated leader steps down |
-| **Partition healing** | Former leader becomes follower, cluster reunifies |
-
 ### Troubleshooting Partitions
 
 #### **Verify Partition State**
@@ -598,7 +491,7 @@ The script supports three different network topology types, each designed for sp
 ./raft-cluster-netns.sh setup -c .raft-cluster.conf
 ```
 
-### Default Network Layout
+### Example: Default Network Layout
 
 ```
 Host Network
@@ -619,16 +512,6 @@ Host Network
     ├── Hostname: ha3.ha-cluster
     └── NSO Node: ncsd3@ha3.ha-cluster
 ```
-
-### Network Components
-
-- **Bridge Interface**: Central networking hub for all nodes (ha-cluster)
-- **Veth Pairs**: Virtual ethernet connections (ha1a↔ha1b, etc.)
-- **Network Namespaces**: Isolated network environments per node (ha1ns, ha2ns, ha3ns)
-- **Hostname Resolution**: Custom hosts files for inter-node communication
-- **NSO Node Addresses**: Erlang distribution names using proper hostnames for RAFT clustering
-
-## Configuration Management
 
 ### Configuration File Format
 
@@ -662,175 +545,6 @@ host=prod.example.com
 2. **Configuration file** 
 3. **Built-in defaults** (lowest priority)
 
-## Usage Examples
-
-### Development Workflow
-
-```bash
-# 1. Create development cluster
-./raft-cluster-netns.sh setup -n 3 --cluster-name "dev-cluster" --verbose
-
-# 2. Start nodes 
-./raft-cluster-netns.sh start
-
-# 3. Debug specific node
-./raft-cluster-netns.sh shell 1
-# In namespace shell:
-ncs_cli -u admin
-show ha-raft status
-
-# 4. Test configuration changes without network recreation
-./raft-cluster-netns.sh stop
-./raft-cluster-netns.sh configure --no-ssl  # Disable SSL if needed
-./raft-cluster-netns.sh start
-
-# 5. Test different cluster configurations
-./raft-cluster-netns.sh configure --cluster-name "test-cluster" -n 5
-
-# 6. Execute commands for testing
-./raft-cluster-netns.sh exec 2 "ncs_cmd -c 'mget /ha-raft/status/role'"
-
-# 7. Clean up when done
-./raft-cluster-netns.sh cleanup --force
-```
-
-### RAFT Resilience Testing
-
-```bash
-# Setup cluster for partition testing
-./raft-cluster-netns.sh setup -n 3 --cluster-name "resilience-test"
-./raft-cluster-netns.sh start
-
-# Test leader failover
-current_leader=$(./raft-cluster-netns.sh status | grep "Leader" | cut -d: -f2)
-./raft-cluster-netns.sh isolate 1  # Assume node 1 is leader
-sleep 5
-./raft-cluster-netns.sh status      # Verify new leader elected
-./raft-cluster-netns.sh heal 1
-
-# Test split-brain scenarios
-./raft-cluster-netns.sh partition 1,2  # Create 2 vs 1 partition
-./raft-cluster-netns.sh status         # Check majority partition behavior
-./raft-cluster-netns.sh heal
-
-# Test minority partition behavior
-./raft-cluster-netns.sh partition 1    # Create 1 vs 2 partition
-./raft-cluster-netns.sh exec 1 "ncs_cmd -c 'mget /ha-raft/status/role'"
-./raft-cluster-netns.sh heal
-
-# Cleanup
-./raft-cluster-netns.sh cleanup --force
-```
-
-### Testing Different Configurations
-
-```bash
-# Test with different cluster sizes
-for nodes in 3 5 7; do
-    echo "Testing $nodes-node cluster..."
-    ./raft-cluster-netns.sh setup -n $nodes --dry-run
-done
-
-# Test SSL configuration (disabled when needed)
-./raft-cluster-netns.sh setup --no-ssl --dry-run
-
-# Test custom network ranges
-./raft-cluster-netns.sh setup --network-prefix "172.16" --dry-run
-
-# Test L3 BGP topology generation
-./raft-cluster-netns.sh configure --auto --type l3bgp -n 5 --dry-run
-
-# Test Tailf-HCC topology generation
-./raft-cluster-netns.sh configure --auto --type tailf_hcc -n 3 --dry-run
-```
-
-### L3 BGP Multi-Site Testing
-
-```bash
-# Generate realistic multi-site BGP topology
-./raft-cluster-netns.sh configure --auto --type l3bgp -n 5
-
-# Review the generated configuration
-cat .raft-cluster.conf
-
-# Setup the L3 BGP cluster
-./raft-cluster-netns.sh setup -c .raft-cluster.conf
-
-# Test BGP connectivity between sites
-./raft-cluster-netns.sh test
-
-# Monitor RAFT behavior across BGP-connected sites
-./raft-cluster-netns.sh start
-./raft-cluster-netns.sh status
-
-# Test network partitions in BGP environment
-./raft-cluster-netns.sh partition berlin,london  # Europe vs Asia-Pacific split
-./raft-cluster-netns.sh status
-./raft-cluster-netns.sh heal
-```
-
-### Tailf-HCC Centralized Routing Testing
-
-```bash
-# Generate Tailf-HCC topology with centralized BGP routing
-./raft-cluster-netns.sh configure --auto --type tailf_hcc -n 3
-
-# Review the generated configuration (BGP only on manager)
-cat .raft-cluster.conf
-
-# Setup the Tailf-HCC cluster
-./raft-cluster-netns.sh setup -c .raft-cluster.conf
-
-# Verify only manager node runs BGP/Zebra
-./raft-cluster-netns.sh status
-
-# Test worker node connectivity through manager
-./raft-cluster-netns.sh test
-
-# Test RAFT behavior with centralized routing
-./raft-cluster-netns.sh start
-./raft-cluster-netns.sh partition 1,2  # Workers vs manager split
-./raft-cluster-netns.sh status
-./raft-cluster-netns.sh heal
-```
-
-### Production-Like Testing
-
-```bash
-# Create production-like environment (SSL enabled by default)
-cat > prod-cluster.conf << EOF
-nodes=5
-cluster_name=production-raft
-prefix=prod
-network_prefix=10.10
-ssl_enabled=true
-ncs_flags=-v
-timeout=120
-EOF
-
-# Setup with production config
-./raft-cluster-netns.sh setup -c prod-cluster.conf
-
-# Monitor cluster health
-./raft-cluster-netns.sh status
-```
-
-### Network Troubleshooting
-
-```bash
-# Test basic connectivity
-./raft-cluster-netns.sh test
-
-# Debug network issues
-./raft-cluster-netns.sh exec 1 "ping -c 3 ha2.ha-cluster"
-./raft-cluster-netns.sh exec 2 "traceroute 192.168.1.1"
-
-# Check routing tables
-./raft-cluster-netns.sh exec 3 "ip route show"
-
-# Verify DNS resolution
-./raft-cluster-netns.sh exec 1 "nslookup ha3.ha-cluster"
-```
 
 ## NSO Integration
 
@@ -843,33 +557,8 @@ The script automatically configures NSO with:
 - **Network Binding**: Node-specific IP addresses
 - **SSL Configuration**: Optional SSL/TLS for secure communication
 
-### Generated Files
-
 For each node, the script creates:
 - `ncs-run1/ncs.conf` - Main NSO configuration
-- `ncs-run1/ncs.conf.tcp` - TCP-only variant (no SSL)
-- `ncs-run1/ncs.conf.ip` - IP-based addressing variant
-
-### NSO Commands in Namespaces
-
-```bash
-# Enter namespace with NSO environment
-./raft-cluster-netns.sh shell 1
-
-# In namespace shell, NSO commands are available:
-ncs                    # Start NSO
-ncs --stop            # Stop NSO  
-ncs_cli -u admin      # NSO CLI
-ncs_cmd -c 'command'  # NSO command interface
-
-# Check RAFT status
-ncs_cmd -c 'mget /ha-raft/status/role'
-ncs_cmd -c 'mget /ha-raft/status/leader'
-
-# Verify node address and connectivity
-ping ha2.ha-cluster   # Test hostname resolution
-cat /etc/hosts        # View hostname mappings
-```
 
 ## Troubleshooting
 
@@ -956,14 +645,6 @@ done
 Use verbose mode for detailed troubleshooting:
 ```bash
 ./raft-cluster-netns.sh setup --verbose --dry-run
-```
-
-### Log Analysis
-
-Check system logs for network namespace issues:
-```bash
-journalctl -u systemd-networkd
-dmesg | grep -i network
 ```
 
 ### L3BGP Network Connectivity Issues
@@ -1076,139 +757,8 @@ sudo ip netns exec l3bgp1ns ip route show
 ./raft-cluster-netns.sh test -c your-config.conf
 ```
 
-## Advanced Features
-
-### Custom SSL Certificates
-
-```bash
-# Setup cluster with custom SSL certificates
-./raft-cluster-netns.sh setup --ssl-enabled --ssl-cert-dir "/path/to/certs"
-```
-
-### Multi-Environment Management
-
-```bash
-# Manage multiple clusters with different configs
-./raft-cluster-netns.sh setup -c cluster-A.conf
-./raft-cluster-netns.sh setup -c cluster-B.conf -p clusterB
-```
-
-### Automated Testing Integration
-
-```bash
-#!/bin/bash
-# Integration test example
-set -e
-
-# Setup test cluster
-./raft-cluster-netns.sh setup -n 3 --cluster-name "test-$$"
-
-# Start nodes
-./raft-cluster-netns.sh start --wait-for-leader --timeout 60
-
-# Run tests
-./raft-cluster-netns.sh exec 1 "your-test-script.sh"
-
-# Cleanup
-./raft-cluster-netns.sh cleanup --force
-```
-
-## Performance Considerations
-
-### Resource Usage
-
-- **Memory**: Each NSO node uses ~100-200MB RAM
-- **CPU**: Minimal when idle, scales with cluster activity
-- **Network**: Virtual interfaces have minimal overhead
-- **Disk**: ~50MB per node for configuration and logs
-
-### Scaling Guidelines
-
-| Cluster Size | Recommended RAM | Notes |
-|--------------|-----------------|-------|
-| 3 nodes | 2GB | Minimum viable cluster |
-| 5 nodes | 4GB | Good for development |
-| 7+ nodes | 6GB+ | Performance testing |
-
-## Security Considerations
-
-### Network Isolation
-
-- Each node runs in isolated network namespace
-- No access to host network by default
-- Inter-node communication only through bridge
-
-### SSL Configuration
-
-SSL/TLS is **enabled by default** for secure Erlang distribution. To disable SSL for testing purposes:
-
-```bash
-# Disable SSL for testing scenarios
-./raft-cluster-netns.sh setup --no-ssl
-
-# Use custom SSL certificate directory (SSL enabled by default)
-./raft-cluster-netns.sh setup --ssl-cert-dir "/secure/certs"
-```
-
-### Cleanup Security
-
-Always clean up test environments:
-```bash
-./raft-cluster-netns.sh cleanup --force
-```
-
-## Contributing
-
-### Development Setup
-
-```bash
-# Clone and test
-git clone <repository>
-cd <repository>
-
-# Test basic functionality
-./raft-cluster-netns.sh setup --dry-run --verbose
-
-# Run integration tests
-./run-tests.sh
-```
-
-### Adding Features
-
-1. Follow the existing function naming convention
-2. Add appropriate logging with `log_info`, `log_debug`
-3. Support dry-run mode in new functions
-4. Update help text and examples
 
 ## License
 
 This project is part of the NSO development toolkit and follows the same licensing terms as the main NSO distribution.
 
-## Support
-
-For issues and questions:
-1. Check the troubleshooting section above
-2. Use verbose mode for detailed diagnostics
-3. Review system logs for network-related issues
-4. Contact the NSO development team for NSO-specific problems
-
----
-
-**Version**: 1.1.0  
-**Last Updated**: September 2025  
-**Compatibility**: NSO 5.x+, Linux with network namespace support
-
-**Key Features in v1.1.0**:
-- ✅ **Network Partition Simulation**: Complete toolkit for testing split-brain scenarios
-- ✅ **Advanced RAFT Testing**: Leader isolation, minority partition behavior, chaos testing
-- ✅ **Connectivity Visualization**: Real-time network connectivity matrix
-- ✅ **Flexible Partition Types**: Single node isolation and multi-node partitions
-- ✅ **Dynamic Healing**: Granular partition healing capabilities
-
-**Previous Features (v1.0.0)**:
-- ✅ Proper hostname resolution with matching NSO node addresses
-- ✅ Circular RAFT seed node configuration for robust clustering  
-- ✅ User context preservation in shell and exec commands
-- ✅ Comprehensive dry-run mode for testing configurations
-- ✅ SSL/TLS support for secure Erlang distribution
-- ✅ Configuration file management with environment persistence
