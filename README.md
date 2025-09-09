@@ -25,6 +25,7 @@ The `raft-cluster-netns.sh` script automates the creation of complete NSO RAFT c
 - Customizable cluster sizes (3-N nodes)
 - Flexible network addressing schemes
 - **L3 BGP topology support** with custom subnets and ASNs
+- **Tailf-HCC topology support** with manager-only BGP routing
 - Auto-generation of realistic multi-location network topologies
 
 ### 🛠️ **Management & Debugging**
@@ -117,6 +118,31 @@ The script supports advanced L3 BGP topology generation for testing complex netw
 - BGP router IDs based on geographic locations
 - Inter-node BGP peering configurations
 - Hostname resolution for realistic multi-site scenarios
+
+### Tailf-HCC Topology Configuration
+
+The script also supports a Tailf-HCC topology designed for scenarios where BGP routing is centralized on a manager node:
+
+```bash
+# Generate Tailf-HCC configuration file
+./raft-cluster-netns.sh configure --auto --type tailf_hcc -n 3
+
+# Setup cluster using the generated Tailf-HCC configuration
+./raft-cluster-netns.sh setup -c .raft-cluster.conf
+```
+
+**Tailf-HCC features:**
+- **Manager-Only BGP**: BGP and Zebra daemons run only on the manager node
+- **Simplified Worker Nodes**: Worker nodes use direct routing without BGP complexity
+- **Centralized Routing Control**: All routing decisions handled by the manager
+- **Hybrid Topology**: Combines L3BGP benefits with simplified worker configuration
+- **Resource Efficient**: Reduces resource usage on worker nodes
+
+**Tailf-HCC configuration includes:**
+- L3BGP-style network topology with per-node subnets
+- BGP/Zebra configuration only on manager node
+- Direct routing from worker nodes to manager
+- Full network connectivity without worker-node routing complexity
 
 ### Advanced Setup
 
@@ -215,7 +241,7 @@ export ENV_SH_PATH="/path/to/your/env.sh"
 | `--cluster-name` | RAFT cluster name | test-cluster |
 | `--network-prefix` | Network address prefix | 192.168 |
 | `--no-ssl` | Disable SSL for Erlang | false (SSL enabled by default) |
-| `--type` | Configuration type (simple, l3bgp) | simple |
+| `--type` | Configuration type (simple, l3bgp, tailf_hcc) | simple |
 | `--auto` | Auto-generate configuration | - |
 | `--dry-run` | Show commands without executing | - |
 | `-v, --verbose` | Verbose output | - |
@@ -496,7 +522,81 @@ sudo ip link del ha-clusterpart 2>/dev/null || true
 watch -n 1 './raft-cluster-netns.sh exec 1 "ncs_cmd -c \"mget /ha-raft/status/role\""'
 ```
 
-## Network Architecture
+## Network Topology Types
+
+The script supports three different network topology types, each designed for specific testing scenarios:
+
+### Network Type Comparison
+
+| Feature | Simple | L3BGP | Tailf-HCC |
+|---------|--------|-------|-----------|
+| **Complexity** | Low | High | Medium |
+| **Resource Usage** | Minimal | High | Medium |
+| **BGP Routing** | None | All nodes | Manager only |
+| **Subnets** | Single flat | Per-node | Per-node |
+| **Use Case** | Basic testing | Multi-site simulation | Centralized routing |
+| **Setup Time** | Fast | Slow | Medium |
+
+### When to Use Each Type
+
+#### **Simple Network** (`--type simple`)
+**Best for**: Basic RAFT functionality testing, development, quick validation
+
+```bash
+./raft-cluster-netns.sh setup  # Default type
+```
+
+**Characteristics**:
+- Single flat network (192.168.x.1/16)
+- No routing protocols
+- Minimal resource overhead
+- Fast setup and teardown
+- Direct node-to-node communication
+
+#### **L3BGP Network** (`--type l3bgp`)
+**Best for**: Production-like testing, multi-site scenarios, complex routing validation
+
+```bash
+./raft-cluster-netns.sh configure --auto --type l3bgp -n 5
+./raft-cluster-netns.sh setup -c .raft-cluster.conf
+```
+
+**Characteristics**:
+- Each node has its own subnet (192.168.30.0/24, 192.168.31.0/24, etc.)
+- Full BGP mesh between all nodes
+- FRR Zebra + GoBGP on every node
+- Realistic multi-site network simulation
+- Higher resource usage (BGP daemons on all nodes)
+
+#### **Tailf-HCC Network** (`--type tailf_hcc`)
+**Best for**: Hub-and-spoke scenarios, resource-constrained testing, centralized routing architectures
+
+```bash
+./raft-cluster-netns.sh configure --auto --type tailf_hcc -n 3
+./raft-cluster-netns.sh setup -c .raft-cluster.conf
+```
+
+**Characteristics**:
+- Per-node subnets like L3BGP (192.168.30.0/24, 192.168.31.0/24, etc.)
+- BGP/Zebra only on manager node
+- Worker nodes use simple routing through manager
+- Reduced resource usage compared to L3BGP
+- Simulates centralized routing control scenarios
+
+### Choosing the Right Type
+
+```bash
+# For basic RAFT testing and development
+./raft-cluster-netns.sh setup
+
+# For testing distributed network scenarios with full BGP mesh
+./raft-cluster-netns.sh configure --auto --type l3bgp -n 5
+./raft-cluster-netns.sh setup -c .raft-cluster.conf
+
+# For testing hub-and-spoke architectures with centralized routing
+./raft-cluster-netns.sh configure --auto --type tailf_hcc -n 3
+./raft-cluster-netns.sh setup -c .raft-cluster.conf
+```
 
 ### Default Network Layout
 
@@ -639,6 +739,9 @@ done
 
 # Test L3 BGP topology generation
 ./raft-cluster-netns.sh configure --auto --type l3bgp -n 5 --dry-run
+
+# Test Tailf-HCC topology generation
+./raft-cluster-netns.sh configure --auto --type tailf_hcc -n 3 --dry-run
 ```
 
 ### L3 BGP Multi-Site Testing
@@ -662,6 +765,31 @@ cat .raft-cluster.conf
 
 # Test network partitions in BGP environment
 ./raft-cluster-netns.sh partition berlin,london  # Europe vs Asia-Pacific split
+./raft-cluster-netns.sh status
+./raft-cluster-netns.sh heal
+```
+
+### Tailf-HCC Centralized Routing Testing
+
+```bash
+# Generate Tailf-HCC topology with centralized BGP routing
+./raft-cluster-netns.sh configure --auto --type tailf_hcc -n 3
+
+# Review the generated configuration (BGP only on manager)
+cat .raft-cluster.conf
+
+# Setup the Tailf-HCC cluster
+./raft-cluster-netns.sh setup -c .raft-cluster.conf
+
+# Verify only manager node runs BGP/Zebra
+./raft-cluster-netns.sh status
+
+# Test worker node connectivity through manager
+./raft-cluster-netns.sh test
+
+# Test RAFT behavior with centralized routing
+./raft-cluster-netns.sh start
+./raft-cluster-netns.sh partition 1,2  # Workers vs manager split
 ./raft-cluster-netns.sh status
 ./raft-cluster-netns.sh heal
 ```

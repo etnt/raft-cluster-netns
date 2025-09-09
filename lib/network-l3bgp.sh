@@ -56,7 +56,7 @@
 
 # Check L3BGP prerequisites
 check_l3bgp_prerequisites() {
-    log_info "Checking L3BGP prerequisites..."
+    log_info "Checking $NETWORK_TYPE prerequisites..."
     local missing_deps=()
     
     # Check for gobgpd
@@ -103,7 +103,7 @@ check_l3bgp_prerequisites() {
     
     # Abort if dependencies missing
     if [[ ${#missing_deps[@]} -gt 0 ]]; then
-        log_error "Missing required dependencies for L3BGP setup:"
+        log_error "Missing required dependencies for $NETWORK_TYPE setup:"
         for dep in "${missing_deps[@]}"; do
             log_error "  - $dep"
         done
@@ -116,17 +116,17 @@ check_l3bgp_prerequisites() {
         exit 1
     fi
     
-    log_info "✅ All L3BGP prerequisites satisfied"
+    log_info "✅ All $NETWORK_TYPE prerequisites satisfied"
 }
 
-# Setup L3BGP network topology
+# Setup $NETWORK_TYPE network topology
 setup_l3bgp_network() {
-    log_info "Setting up L3BGP network topology..."
+    log_info "Setting up $NETWORK_TYPE network topology..."
     
-    # Parse L3BGP-specific configuration
+    # Parse $NETWORK_TYPE-specific configuration
     parse_l3bgp_config
     
-    # Create L3BGP network components
+    # Create $NETWORK_TYPE network components
     create_l3bgp_hosts_files
     create_frr_directories
     create_l3bgp_veth_pairs
@@ -138,7 +138,7 @@ setup_l3bgp_network() {
         setup_manager_node
     fi
     
-    # Validate L3BGP network
+    # Validate $NETWORK_TYPE network
     validate_l3bgp_network
     
     if [[ "${DRY_RUN}" != "true" ]]; then
@@ -152,12 +152,12 @@ setup_l3bgp_network() {
     create_gobgp_configs
     start_gobgp_daemons
     
-    log_info "L3BGP network setup completed"
+    log_info "$NETWORK_TYPE network setup completed"
 }
 
-# Parse L3BGP node configuration from loaded config
+# Parse $NETWORK_TYPE node configuration from loaded config
 parse_l3bgp_config() {
-    log_info "Parsing L3BGP configuration..."
+    log_info "Parsing $NETWORK_TYPE configuration..."
     
     # Parse node-specific settings
     for ((i=1; i<=NODES; i++)); do
@@ -182,9 +182,9 @@ parse_l3bgp_config() {
     log_debug "Manager: Enabled=$MANAGER_ENABLED, IP=$MANAGER_IP, ASN=$MANAGER_ASN"
 }
 
-# Setup L3BGP NSO packages
+# Setup $NETWORK_TYPE NSO packages
 setup_l3bgp_nso_packages() {
-    log_info "Setting up L3BGP NSO packages..."
+    log_info "Setting up $NETWORK_TYPE NSO packages..."
     
     # Clone tailf-hcc package if not exists
     local hcc_dir="${WORK_DIR}/tailf-hcc"
@@ -276,18 +276,18 @@ wait_for_gobgp_zebra() {
     return 1
 }
 
-# Create L3BGP hosts file for a namespace
+# Create $NETWORK_TYPE hosts file for a namespace
 create_l3bgp_hosts_file() {
     local node_id="$1"
     local hosts_dir="${WORK_DIR}/hosts/${PREFIX}${node_id}ns"
     local hosts_file="${hosts_dir}/hosts"
     
-    log_debug "Creating L3BGP hosts file for node $node_id"
+    log_debug "Creating $NETWORK_TYPE hosts file for node $node_id"
     
     execute_cmd "mkdir -p $hosts_dir"
     
     if [[ "${DRY_RUN}" == "true" ]]; then
-        log_debug "[DRY-RUN] Would create L3BGP hosts file: $hosts_file"
+        log_debug "[DRY-RUN] Would create $NETWORK_TYPE hosts file: $hosts_file"
         return 0
     fi
     
@@ -299,7 +299,7 @@ ff00::0     ip6-mcastprefix
 ff02::1     ip6-allnodes
 ff02::2     ip6-allrouters
 
-# L3BGP Cluster nodes
+# $NETWORK_TYPE Cluster nodes
 EOF
 
     # Add entries for all cluster nodes (custom IPs and hostnames)
@@ -316,9 +316,9 @@ EOF
     fi
 }
 
-# Create all L3BGP hosts files
+# Create all $NETWORK_TYPE hosts files
 create_l3bgp_hosts_files() {
-    log_info "Creating L3BGP hosts files..."
+    log_info "Creating $NETWORK_TYPE hosts files..."
     
     for ((i=1; i<=NODES; i++)); do
         create_l3bgp_hosts_file "$i"
@@ -361,15 +361,15 @@ create_frr_directories() {
     fi
 }
 
-# Create L3BGP virtual ethernet pairs
+# Create $NETWORK_TYPE virtual ethernet pairs
 create_l3bgp_veth_pairs() {
-    log_info "Creating L3BGP virtual ethernet pairs..."
+    log_info "Creating $NETWORK_TYPE virtual ethernet pairs..."
     
     for ((i=1; i<=NODES; i++)); do
         local veth_a="${PREFIX}${i}a"
         local veth_b="${PREFIX}${i}b"
         
-        log_debug "Creating L3BGP veth pair: $veth_a <-> $veth_b"
+        log_debug "Creating $NETWORK_TYPE veth pair: $veth_a <-> $veth_b"
         execute_cmd "sudo ip link add dev $veth_a type veth peer name $veth_b"
     done
     
@@ -383,9 +383,9 @@ create_l3bgp_veth_pairs() {
     fi
 }
 
-# Create L3BGP network namespaces
+# Create $NETWORK_TYPE network namespaces
 create_l3bgp_namespaces() {
-    log_info "Creating L3BGP network namespaces..."
+    log_info "Creating $NETWORK_TYPE network namespaces..."
     
     for ((i=1; i<=NODES; i++)); do
         local netns="${PREFIX}${i}ns"
@@ -393,7 +393,7 @@ create_l3bgp_namespaces() {
         local node_ip="$(get_node_ip "$i")"
         local node_hostname="$(get_node_hostname "$i")"
         
-        log_info "Creating L3BGP namespace: $netns ($node_hostname)"
+        log_info "Creating $NETWORK_TYPE namespace: $netns ($node_hostname)"
         
         # Create namespace
         execute_cmd "sudo ip netns add $netns"
@@ -409,7 +409,7 @@ create_l3bgp_namespaces() {
         execute_cmd "sudo ip -n $netns link set dev $veth_a up"
         execute_cmd "sudo ip -n $netns link set dev lo up"
         
-        # Add routing for L3BGP topology
+        # Add routing for $NETWORK_TYPE topology
         # Each node needs to know how to reach other subnets through the bridge
         local node_subnet="$(get_node_subnet "$i")"
         local subnet_prefix=$(echo "$node_subnet" | cut -d'/' -f1 | cut -d'.' -f1-3)
@@ -429,25 +429,25 @@ create_l3bgp_namespaces() {
         # Add hosts file
         add_hosts_to_namespace "$i"
         
-        log_info "L3BGP namespace $netns created successfully with IP $node_ip"
+        log_info "$NETWORK_TYPE namespace $netns created successfully with IP $node_ip"
     done
     
-    log_info "All L3BGP namespaces created successfully"
+    log_info "All $NETWORK_TYPE namespaces created successfully"
 }
 
-# Setup L3BGP bridges (simplified for now)
+# Setup $NETWORK_TYPE bridges (simplified for now)
 setup_l3bgp_bridges() {
-    log_info "Setting up L3BGP bridge network..."
+    log_info "Setting up $NETWORK_TYPE bridge network..."
     
     # Create main bridge
     execute_cmd "sudo ip link add dev $BRIDGE_NAME type bridge"
-    log_info "L3BGP bridge $BRIDGE_NAME created"
+    log_info "$NETWORK_TYPE bridge $BRIDGE_NAME created"
     
     # Connect all veth interfaces to bridge
     for ((i=1; i<=NODES; i++)); do
         local veth_b="${PREFIX}${i}b"
         
-        log_debug "Connecting $veth_b to L3BGP bridge $BRIDGE_NAME"
+        log_debug "Connecting $veth_b to $NETWORK_TYPE bridge $BRIDGE_NAME"
         execute_cmd "sudo ip link set dev $veth_b master $BRIDGE_NAME"
         execute_cmd "sudo ip link set dev $veth_b up"
     done
@@ -462,17 +462,17 @@ setup_l3bgp_bridges() {
     # Add gateway address to bridge
     execute_cmd "sudo ip addr add ${NETWORK_PREFIX}.0.254/16 dev $BRIDGE_NAME"
     
-    # Add gateway IPs for each L3BGP subnet
+    # Add gateway IPs for each $NETWORK_TYPE subnet
     for ((i=1; i<=NODES; i++)); do
         local node_subnet="$(get_node_subnet "$i")"
         local subnet_prefix=$(echo "$node_subnet" | cut -d'/' -f1 | cut -d'.' -f1-3)
         local subnet_gateway="${subnet_prefix}.254"
         execute_cmd "sudo ip addr add ${subnet_gateway}/24 dev $BRIDGE_NAME"
-        log_debug "Added L3BGP gateway: ${subnet_gateway}/24"
+        log_debug "Added $NETWORK_TYPE gateway: ${subnet_gateway}/24"
     done
     execute_cmd "sudo ip link set dev $BRIDGE_NAME up"
     
-    # Enable IP forwarding for L3BGP routing
+    # Enable IP forwarding for $NETWORK_TYPE routing
     execute_cmd "sudo sysctl -w net.ipv4.ip_forward=1"
 }
 
@@ -799,12 +799,12 @@ start_gobgp_daemons() {
     
 }
 
-# Validate L3BGP network
+# Validate $NETWORK_TYPE network
 validate_l3bgp_network() {
-    log_info "Validating L3BGP network connectivity..."
+    log_info "Validating $NETWORK_TYPE network connectivity..."
     
     if [[ "${DRY_RUN}" == "true" ]]; then
-        log_debug "[DRY-RUN] Skipping L3BGP network validation"
+        log_debug "[DRY-RUN] Skipping $NETWORK_TYPE network validation"
         return 0
     fi
     
@@ -816,12 +816,12 @@ validate_l3bgp_network() {
         
         # Check namespace interface
         if ! sudo ip -n "$netns" addr show "$veth_a" | grep -q "UP,LOWER_UP"; then
-            log_error "L3BGP namespace interface $veth_a in $netns is not up"
+            log_error "$NETWORK_TYPE namespace interface $veth_a in $netns is not up"
             return 1
         fi
         
         if ! sudo ip -n "$netns" addr show "$veth_a" | grep -q "inet ${node_ip}/24"; then
-            log_error "L3BGP namespace interface missing IP address: $node_ip"
+            log_error "$NETWORK_TYPE namespace interface missing IP address: $node_ip"
             return 1
         fi
         
@@ -840,15 +840,15 @@ validate_l3bgp_network() {
         log_debug "✅ Manager node validation passed"
     fi
     
-    log_info "L3BGP network validation passed"
+    log_info "$NETWORK_TYPE network validation passed"
 }
 
-# Test L3BGP network connectivity
+# Test $NETWORK_TYPE network connectivity
 test_l3bgp_connectivity() {
-    log_info "Testing L3BGP network connectivity..."
+    log_info "Testing $NETWORK_TYPE network connectivity..."
     
     if [[ "${DRY_RUN}" == "true" ]]; then
-        log_debug "[DRY-RUN] Skipping L3BGP connectivity tests"
+        log_debug "[DRY-RUN] Skipping $NETWORK_TYPE connectivity tests"
         return 0
     fi
     
@@ -883,12 +883,12 @@ test_l3bgp_connectivity() {
         done
     done
     
-    log_info "L3BGP network connectivity test passed"
+    log_info "$NETWORK_TYPE network connectivity test passed"
 }
 
-# Cleanup L3BGP network
+# Cleanup $NETWORK_TYPE network
 cleanup_l3bgp_network() {
-    log_info "Cleaning up L3BGP network infrastructure..."
+    log_info "Cleaning up $NETWORK_TYPE network infrastructure..."
     
     # Stop GoBGP daemons
     stop_gobgp_daemons
@@ -927,7 +927,7 @@ cleanup_l3bgp_network() {
         execute_cmd "rm -rf ${WORK_DIR}/gobgp"
     fi
     
-    log_info "L3BGP network cleanup completed"
+    log_info "$NETWORK_TYPE network cleanup completed"
 }
 
 # Stop all Zebra daemons
