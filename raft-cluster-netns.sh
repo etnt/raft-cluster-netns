@@ -374,6 +374,7 @@ check_prerequisites() {
 # Network functions are now in modules:
 # - lib/network-simple.sh for simple network topology  
 # - lib/network-l3bgp.sh for L3BGP network topology
+# - lib/network-tailf_hcc.sh for tailf_hcc network topology
 #
 # The following functions have been moved to the appropriate modules:
 # - create_veth_pairs() / delete_veth_pairs()
@@ -391,6 +392,11 @@ test_connectivity() {
     if [[ "$NETWORK_TYPE" == "l3bgp" ]]; then
         source "$SCRIPT_DIR/lib/network-l3bgp.sh"
         # Parse L3BGP configuration first
+        parse_l3bgp_config
+        test_l3bgp_connectivity
+    elif [[ "$NETWORK_TYPE" == "tailf_hcc" ]]; then
+        source "$SCRIPT_DIR/lib/network-tailf_hcc.sh"
+        # Parse L3BGP configuration first (tailf_hcc uses L3BGP base)
         parse_l3bgp_config
         test_l3bgp_connectivity
     else
@@ -618,7 +624,7 @@ show_partition_status() {
                 printf "%8s" "SELF"
             else
                 local target_ip
-                if [[ "$NETWORK_TYPE" == "l3bgp" ]]; then
+                if [[ "$NETWORK_TYPE" == "l3bgp" || "$NETWORK_TYPE" == "tailf_hcc" ]]; then
                     # For L3BGP, get the actual node IP from configuration
                     target_ip=$(eval echo "\$NODE_${j}_IP")
                     if [[ -z "$target_ip" ]]; then
@@ -788,7 +794,7 @@ setup_nso_node() {
     local node_ip
     
     # Use L3BGP node IP if configured, otherwise fall back to simple addressing
-    if [[ "$NETWORK_TYPE" == "l3bgp" ]]; then
+    if [[ "$NETWORK_TYPE" == "l3bgp" || "$NETWORK_TYPE" == "tailf_hcc" ]]; then
         node_ip=$(eval echo "\$NODE_${node_id}_IP")
         if [[ -z "$node_ip" ]]; then
             node_ip="${NETWORK_PREFIX}.${node_id}.1"  # fallback
@@ -987,7 +993,7 @@ setup_nso_nodes() {
     done
     
     # Setup L3BGP-specific NSO packages if using L3BGP network (after NSO directories exist)
-    if [[ "$NETWORK_TYPE" == "l3bgp" ]]; then
+    if [[ "$NETWORK_TYPE" == "l3bgp" || "$NETWORK_TYPE" == "tailf_hcc" ]]; then
         setup_l3bgp_nso_packages
     fi
     
@@ -1002,7 +1008,7 @@ start_nso_node() {
     local node_ip
     
     # Use L3BGP node IP if configured, otherwise fall back to simple addressing
-    if [[ "$NETWORK_TYPE" == "l3bgp" ]]; then
+    if [[ "$NETWORK_TYPE" == "l3bgp" || "$NETWORK_TYPE" == "tailf_hcc" ]]; then
         node_ip=$(eval echo "\$NODE_${node_id}_IP")
         if [[ -z "$node_ip" ]]; then
             log_error "L3BGP node IP not found for node $node_id. Ensure L3BGP config is parsed."
@@ -1060,7 +1066,7 @@ stop_nso_node() {
     local node_ip
     
     # Use L3BGP node IP if configured, otherwise fall back to simple addressing  
-    if [[ "$NETWORK_TYPE" == "l3bgp" ]]; then
+    if [[ "$NETWORK_TYPE" == "l3bgp" || "$NETWORK_TYPE" == "tailf_hcc" ]]; then
         node_ip=$(eval echo "\$NODE_${node_id}_IP")
         if [[ -z "$node_ip" ]]; then
             node_ip="${NETWORK_PREFIX}.${node_id}.1"  # fallback
@@ -1159,7 +1165,7 @@ check_nso_node_status() {
     local node_ip
     
     # Use L3BGP node IP if configured, otherwise fall back to simple addressing
-    if [[ "$NETWORK_TYPE" == "l3bgp" ]]; then
+    if [[ "$NETWORK_TYPE" == "l3bgp" || "$NETWORK_TYPE" == "tailf_hcc" ]]; then
         node_ip=$(eval echo "\$NODE_${node_id}_IP")
         if [[ -z "$node_ip" ]]; then
             node_ip="${NETWORK_PREFIX}.${node_id}.1"  # fallback
@@ -1217,7 +1223,7 @@ show_nso_status() {
         local node_ip
         
         # Use L3BGP node IP if configured, otherwise fall back to simple addressing
-        if [[ "$NETWORK_TYPE" == "l3bgp" ]]; then
+        if [[ "$NETWORK_TYPE" == "l3bgp" || "$NETWORK_TYPE" == "tailf_hcc" ]]; then
             node_ip=$(eval echo "\$NODE_${i}_IP")
             if [[ -z "$node_ip" ]]; then
                 node_ip="${NETWORK_PREFIX}.${i}.1"  # fallback
@@ -1256,6 +1262,11 @@ setup_network() {
         source "$SCRIPT_DIR/lib/network-l3bgp.sh"
         check_l3bgp_prerequisites
         setup_l3bgp_network
+    elif [[ "$NETWORK_TYPE" == "tailf_hcc" ]]; then
+        log_info "Using tailf_hcc network topology"
+        source "$SCRIPT_DIR/lib/network-tailf_hcc.sh"
+        check_l3bgp_prerequisites
+        setup_l3bgp_network
     else
         log_info "Using simple network topology"
         source "$SCRIPT_DIR/lib/network-simple.sh"
@@ -1283,6 +1294,9 @@ cleanup_network() {
     # Load appropriate network module for cleanup
     if [[ "$NETWORK_TYPE" == "l3bgp" ]]; then
         source "$SCRIPT_DIR/lib/network-l3bgp.sh"
+        cleanup_l3bgp_network
+    elif [[ "$NETWORK_TYPE" == "tailf_hcc" ]]; then
+        source "$SCRIPT_DIR/lib/network-tailf_hcc.sh"
         cleanup_l3bgp_network
     else
         source "$SCRIPT_DIR/lib/network-simple.sh"
@@ -1412,12 +1426,13 @@ EXAMPLES:
     # Generate configuration files
     $SCRIPT_NAME configure --auto                          # Auto-generate simple config
     $SCRIPT_NAME configure --auto --type l3bgp             # Auto-generate L3 BGP config
+    $SCRIPT_NAME configure --auto --type tailf_hcc         # Auto-generate tailf_hcc config
     $SCRIPT_NAME configure --auto --nodes 5 --output my.conf
     $SCRIPT_NAME configure                                  # Interactive wizard
 
 CONFIGURE OPTIONS:
     --auto                  Auto-generate configuration (no prompts)
-    --type <type>           Configuration type: simple, l3bgp (default: simple)
+    --type <type>           Configuration type: simple, l3bgp, tailf_hcc (default: simple)
     --output <file>         Output configuration file (default: .raft-cluster.conf)
     --nodes <count>         Number of nodes for auto-generation
     --force                 Overwrite existing configuration file
@@ -1637,7 +1652,7 @@ parse_args() {
             ;;
         start)
             # Parse L3BGP config if needed for proper IP addressing
-            if [[ "$NETWORK_TYPE" == "l3bgp" ]]; then
+            if [[ "$NETWORK_TYPE" == "l3bgp" || "$NETWORK_TYPE" == "tailf_hcc" ]]; then
                 source "$SCRIPT_DIR/lib/network-l3bgp.sh"
                 parse_l3bgp_config
             fi
@@ -1645,7 +1660,7 @@ parse_args() {
             ;;
         stop)
             # Parse L3BGP config if needed for proper IP addressing
-            if [[ "$NETWORK_TYPE" == "l3bgp" ]]; then
+            if [[ "$NETWORK_TYPE" == "l3bgp" || "$NETWORK_TYPE" == "tailf_hcc" ]]; then
                 source "$SCRIPT_DIR/lib/network-l3bgp.sh"
                 parse_l3bgp_config
             fi
@@ -1653,7 +1668,7 @@ parse_args() {
             ;;
         cleanup)
             # Parse L3BGP config if needed for proper IP addressing
-            if [[ "$NETWORK_TYPE" == "l3bgp" ]]; then
+            if [[ "$NETWORK_TYPE" == "l3bgp" || "$NETWORK_TYPE" == "tailf_hcc" ]]; then
                 source "$SCRIPT_DIR/lib/network-l3bgp.sh"
                 parse_l3bgp_config
             fi
@@ -1661,7 +1676,7 @@ parse_args() {
             ;;
         status)
             # Parse L3BGP config if needed for proper status display
-            if [[ "$NETWORK_TYPE" == "l3bgp" ]]; then
+            if [[ "$NETWORK_TYPE" == "l3bgp" || "$NETWORK_TYPE" == "tailf_hcc" ]]; then
                 source "$SCRIPT_DIR/lib/network-l3bgp.sh"
                 parse_l3bgp_config
             fi
@@ -1673,7 +1688,7 @@ parse_args() {
                 exit 1
             fi
             # Parse L3BGP config if needed for proper IP addressing
-            if [[ "$NETWORK_TYPE" == "l3bgp" ]]; then
+            if [[ "$NETWORK_TYPE" == "l3bgp" || "$NETWORK_TYPE" == "tailf_hcc" ]]; then
                 source "$SCRIPT_DIR/lib/network-l3bgp.sh"
                 parse_l3bgp_config
             fi
@@ -1685,7 +1700,7 @@ parse_args() {
                 exit 1
             fi
             # Parse L3BGP config if needed for proper IP addressing
-            if [[ "$NETWORK_TYPE" == "l3bgp" ]]; then
+            if [[ "$NETWORK_TYPE" == "l3bgp" || "$NETWORK_TYPE" == "tailf_hcc" ]]; then
                 source "$SCRIPT_DIR/lib/network-l3bgp.sh"
                 parse_l3bgp_config
             fi
@@ -1757,7 +1772,7 @@ show_status() {
     done
     
     # Show manager namespace for L3BGP
-    if [[ "$NETWORK_TYPE" == "l3bgp" ]]; then
+    if [[ "$NETWORK_TYPE" == "l3bgp" || "$NETWORK_TYPE" == "tailf_hcc" ]]; then
         local mgr_ns="${PREFIX}manager"
         if ip netns list | grep -q "^$mgr_ns"; then
             echo -e "    $mgr_ns: ${GREEN}EXISTS${NC}"
@@ -1781,7 +1796,7 @@ enter_namespace_shell() {
     
     # Calculate node IP based on network type
     local node_ip
-    if [[ "$NETWORK_TYPE" == "l3bgp" ]]; then
+    if [[ "$NETWORK_TYPE" == "l3bgp" || "$NETWORK_TYPE" == "tailf_hcc" ]]; then
         node_ip=$(eval echo "\$NODE_${node_id}_IP")
         if [[ -z "$node_ip" ]]; then
             node_ip="${NETWORK_PREFIX}.${node_id}.1"  # fallback
@@ -1834,7 +1849,7 @@ exec_in_namespace() {
     
     # Calculate node IP based on network type
     local node_ip
-    if [[ "$NETWORK_TYPE" == "l3bgp" ]]; then
+    if [[ "$NETWORK_TYPE" == "l3bgp" || "$NETWORK_TYPE" == "tailf_hcc" ]]; then
         node_ip=$(eval echo "\$NODE_${node_id}_IP")
         if [[ -z "$node_ip" ]]; then
             node_ip="${NETWORK_PREFIX}.${node_id}.1"  # fallback
@@ -1886,6 +1901,9 @@ generate_auto_config() {
             ;;
         "l3bgp")
             generate_l3bgp_config "$num_nodes" "$output_file"
+            ;;
+        "tailf_hcc")
+            generate_tailf_hcc_config "$num_nodes" "$output_file"
             ;;
         *)
             log_error "Unknown configuration type: $config_type"
@@ -2007,6 +2025,77 @@ timeout=30
 EOF
     
     log_info "Generated L3 BGP configuration: $output_file"
+}
+
+# Generate tailf_hcc configuration file
+generate_tailf_hcc_config() {
+    local num_nodes="$1"
+    local output_file="$2"
+    
+    cat > "$output_file" << EOF
+# RAFT Cluster Configuration - tailf_hcc Topology
+# Generated automatically on $(date)
+# BGP/Zebra only on manager node, workers use simple networking
+
+# Basic cluster settings
+nodes=$num_nodes
+cluster_name=tailf_hcc-cluster
+prefix=tailf_hcc
+work_dir=$WORK_DIR
+
+# Network topology type
+network_type=tailf_hcc
+
+# Manager node configuration
+manager_enabled=true
+manager_name=manager
+manager_ip=172.17.0.2
+manager_subnet=172.17.0.0/16
+manager_asn=64500
+manager_bridge=docker0
+
+# BGP configuration (manager only)
+bgp_enabled=true
+bgp_router_id_base=1.1.1
+
+EOF
+
+    # Generate node-specific configurations
+    for ((i=1; i<=num_nodes; i++)); do
+        local node_name="${DEFAULT_NODE_NAMES[$((i-1))]}"
+        local node_asn=$((DEFAULT_ASN_BASE + i))
+        local subnet_third=$((30 + i - 1))
+        local host_last=$((96 + i))
+        
+        cat >> "$output_file" << EOF
+# Node $i - ${node_name^}
+node_${i}_name=$node_name
+node_${i}_ip=192.168.$subnet_third.$host_last
+node_${i}_subnet=192.168.$subnet_third.0/24
+node_${i}_asn=$node_asn
+node_${i}_hostname=$node_name.cluster.local
+
+EOF
+    done
+    
+    cat >> "$output_file" << EOF
+# Inter-node connectivity (manager has BGP, workers have direct connection)
+connect_manager_berlin=direct
+connect_manager_london=direct
+connect_manager_paris=direct
+
+# NSO settings
+ssl_enabled=true
+ssl_cert_dir=
+ncs_flags=
+host=localhost.localdomain
+env_sh_path=$ENV_SH_PATH
+
+# Timeouts
+timeout=30
+EOF
+    
+    log_info "Generated tailf_hcc configuration: $output_file"
 }
 
 # Interactive configuration wizard
