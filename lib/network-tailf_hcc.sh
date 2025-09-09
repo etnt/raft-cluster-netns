@@ -149,3 +149,100 @@ get_manager_node() {
     # Fallback to manager naming convention
     echo "manager"
 }
+
+# Override setup_l3bgp_nso_packages to include HCC XML config generation
+setup_l3bgp_nso_packages() {
+    log_info "Setting up tailf_hcc NSO packages..."
+    
+    # Clone tailf-hcc package if not exists
+    local hcc_dir="${WORK_DIR}/tailf-hcc"
+    if [[ ! -d "$hcc_dir" ]]; then
+        log_info "Cloning tailf-hcc package..."
+        execute_cmd "git clone ssh://git@stash.tail-f.com/pkg/tailf-hcc.git $hcc_dir"
+    fi
+    
+    # Create package links and HCC config files in each NSO node
+    for ((i=1; i<=NODES; i++)); do
+        local packages_dir="${WORK_DIR}/ncs-run${i}/packages"
+        local hcc_link="${packages_dir}/tailf-hcc"
+        
+        if [[ ! -L "$hcc_link" ]]; then
+            log_info "Creating tailf-hcc package link for node $i"
+            execute_cmd "ln -sf $hcc_dir $hcc_link"
+        fi
+        
+        # Generate HCC XML configuration for this node
+        generate_hcc_config "$i"
+    done
+}
+
+# Generate HCC XML configuration for a node
+generate_hcc_config() {
+    local node_id="$1"
+    local node_dir="${WORK_DIR}/ncs-run${node_id}"
+    local hcc_config="${node_dir}/hcc.xml"
+    
+    # Get node configuration
+    local node_ip=$(get_node_ip "$node_id")
+    local node_hostname=$(get_node_hostname "$node_id")
+    local node_subnet=$(get_node_subnet "$node_id")
+    local node_asn
+    eval node_asn="\$NODE_${node_id}_ASN"
+    
+    # Generate the correct node-id format: ncsd{node_id}@tailf_hcc{node_id}.ha-cluster
+    local hcc_node_id="ncsd${node_id}@tailf_hcc${node_id}.ha-cluster"
+    
+    # Extract the manager IP for neighbor configuration
+    local manager_ip="${MANAGER_IP:-172.17.0.2}"
+    local manager_subnet_ip
+    
+    # Calculate manager IP in this node's subnet (e.g., 192.168.30.2 for node 1)
+    local subnet_base=$(echo "$node_subnet" | cut -d'.' -f1-3)
+    manager_subnet_ip="${subnet_base}.2"
+    
+    log_info "Generating HCC config for node $node_id: $hcc_config"
+    
+    if [[ "${DRY_RUN}" != "true" ]]; then
+        cat > "$hcc_config" << EOF
+<config xmlns="http://tail-f.com/ns/config/1.0">
+  <hcc xmlns="http://cisco.com/pkg/tailf-hcc">
+    <bgp>
+      <node>
+        <node-id>$hcc_node_id</node-id>
+        <enabled>true</enabled>
+        <as>$node_asn</as>
+        <router-id>$node_ip</router-id>
+        <neighbor>
+          <address>$manager_subnet_ip</address>
+          <as>\${MANAGER_ASN:-64500}</as>
+          <enabled>true</enabled>
+        </neighbor>
+EOF
+
+        # Add neighbor entries for other nodes (full mesh BGP peering)
+        for ((j=1; j<=NODES; j++)); do
+            if [[ $j -ne $node_id ]]; then
+                local peer_ip=$(get_node_ip "$j")
+                local peer_asn
+                eval peer_asn="\$NODE_${j}_ASN"
+                
+                cat >> "$hcc_config" << EOF
+        <neighbor>
+          <address>$peer_ip</address>
+          <as>$peer_asn</as>
+          <enabled>true</enabled>
+        </neighbor>
+EOF
+            fi
+        done
+        
+        cat >> "$hcc_config" << EOF
+      </node>
+    </bgp>
+  </hcc>
+</config>
+EOF
+    else
+        log_debug "[DRY-RUN] Would generate HCC config: $hcc_config"
+    fi
+}

@@ -82,6 +82,7 @@ The script also supports a Tailf-HCC topology designed for scenarios where BGP r
 - **Resource Efficient**: Reduces resource usage on worker nodes
 
 **Tailf-HCC configuration includes:**
+- A `hcc.xml` config file is created for each node.
 - L3BGP-style network topology with per-node subnets
 - BGP/Zebra configuration only on manager node
 - Direct routing from worker nodes to manager
