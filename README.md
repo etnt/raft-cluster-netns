@@ -196,6 +196,31 @@ export ENV_SH_PATH="/path/to/your/env.sh"
 | `-v, --verbose` | Verbose output | - |
 | `-c, --config` | Configuration file | .raft-cluster.conf |
 
+## Running the HCC Package with NSO as a Non-Root User
+
+GoBGP uses TCP port 179 for its communications and binds to it at startup.
+As port 179 is considered a privileged port it is normally required to run
+`gobgpd` as root.
+
+When NSO is running as a non-root user the gobgpd command will be executed as
+the same user as NSO and will prevent `gobgpd` from binding to port 179.
+
+There a multiple ways of handling this and two are listed here.
+
+1. Set capability CAP_NET_BIND_SERVICE on the gobgpd file.
+   May not be supported by all Linux distributions.
+
+```bash
+$ sudo setcap 'cap_net_bind_service=+ep' /usr/bin/gobgpd
+```
+
+2. Set the owner to root and the setuid bit of the gobgpd file.
+   Works on all Linux distributions.
+
+```bash
+$ sudo chown root /usr/bin/gobgpd
+$ sudo chmod u+s /usr/bin/gobgpd
+```
 
 ## Troubleshooting: Downgrading GoBGP and FRR
 
