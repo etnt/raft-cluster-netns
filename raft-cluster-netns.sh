@@ -2122,19 +2122,20 @@ run_configure_wizard() {
     fi
     
     if [[ "$AUTO_GENERATE" == "true" ]]; then
-        # Auto-generation mode
+        # Auto-generation mode (enabled by --auto flag)
         local num_nodes="${NODES:-3}"
         if [[ -z "$NODES" ]]; then
             read -p "Number of nodes [3]: " num_nodes
             num_nodes="${num_nodes:-3}"
         fi
         
-        echo "Configuration type options:"
-        echo "  simple - Traditional flat network (current default)"
-        echo "  l3bgp  - Layer 3 BGP with custom subnets and ASNs"
-        echo ""
         local config_type="$CONFIG_TYPE"
-        if [[ "$config_type" == "simple" ]]; then
+        if [[ -z "$config_type" ]]; then
+            echo "Configuration type options:"
+            echo "  simple - Traditional flat network (current default)"
+            echo "  l3bgp  - Layer 3 BGP with custom subnets and ASNs"
+            echo "  tailf_hcc - Layer 3 BGP with HCC-specific configuration"
+            echo ""
             read -p "Configuration type [simple]: " config_type
             config_type="${config_type:-simple}"
         fi
@@ -2166,27 +2167,49 @@ run_interactive_config() {
     read -p "Number of nodes [3]: " num_nodes
     num_nodes="${num_nodes:-3}"
     
-    read -p "Cluster name [raft-cluster]: " cluster_name
-    cluster_name="${cluster_name:-raft-cluster}"
+    # Set defaults based on pre-selected config type
+    local default_cluster="raft-cluster"
+    local default_prefix="ha"
+    if [[ "$CONFIG_TYPE" == "tailf_hcc" ]]; then
+        default_cluster="tailf_hcc-cluster"
+        default_prefix="tailf_hcc"
+    fi
     
-    read -p "Namespace prefix [ha]: " prefix
-    prefix="${prefix:-ha}"
+    read -p "Cluster name [$default_cluster]: " cluster_name
+    cluster_name="${cluster_name:-$default_cluster}"
+    
+    read -p "Namespace prefix [$default_prefix]: " prefix
+    prefix="${prefix:-$default_prefix}"
     
     echo ""
     echo "Configuration type options:"
     echo "  1) simple - Traditional flat network"
     echo "  2) l3bgp  - Layer 3 BGP with custom topologies"
+    echo "  3) tailf_hcc - Layer 3 BGP with HCC-specific configuration"
     echo ""
-    read -p "Choose configuration type [1]: " type_choice
-    type_choice="${type_choice:-1}"
+    
+    # Pre-select based on CONFIG_TYPE if provided
+    local default_choice="1"
+    if [[ "$CONFIG_TYPE" == "l3bgp" ]]; then
+        default_choice="2"
+    elif [[ "$CONFIG_TYPE" == "tailf_hcc" ]]; then
+        default_choice="3"
+    fi
+    
+    read -p "Choose configuration type [$default_choice]: " type_choice
+    type_choice="${type_choice:-$default_choice}"
     
     local config_type="simple"
     if [[ "$type_choice" == "2" ]]; then
         config_type="l3bgp"
+    elif [[ "$type_choice" == "3" ]]; then
+        config_type="tailf_hcc"
     fi
     
     if [[ "$config_type" == "simple" ]]; then
         create_interactive_simple_config "$output_file" "$num_nodes" "$cluster_name" "$prefix"
+    elif [[ "$config_type" == "tailf_hcc" ]]; then
+        create_interactive_tailf_hcc_config "$output_file" "$num_nodes" "$cluster_name" "$prefix"
     else
         create_interactive_l3bgp_config "$output_file" "$num_nodes" "$cluster_name" "$prefix"
     fi
@@ -2225,6 +2248,104 @@ ssl_cert_dir=
 ncs_flags=
 host=localhost.localdomain
 env_sh_path=$(pwd)/env.sh
+
+# Timeouts
+timeout=30
+EOF
+}
+
+# Create interactive tailf_hcc config
+create_interactive_tailf_hcc_config() {
+    local output_file="$1"
+    local num_nodes="$2"
+    local cluster_name="$3"
+    local prefix="$4"
+    
+    echo ""
+    echo "=== Tailf HCC Configuration ==="
+    echo "This creates a Layer 3 BGP setup with HCC-specific configuration."
+    echo "BGP/Zebra only on manager node, workers use simple networking."
+    echo ""
+    
+    # Use tailf_hcc defaults for cluster_name and prefix
+    cluster_name="tailf_hcc-cluster"
+    prefix="tailf_hcc"
+    
+    # Start with basic tailf_hcc template
+    cat > "$output_file" << EOF
+# RAFT Cluster Configuration - tailf_hcc Topology
+# Created interactively on $(date)
+# BGP/Zebra only on manager node, workers use simple networking
+
+# Basic cluster settings
+nodes=$num_nodes
+cluster_name=$cluster_name
+prefix=$prefix
+work_dir=$WORK_DIR
+
+# Network topology type
+network_type=tailf_hcc
+
+# Manager node configuration
+manager_enabled=true
+manager_name=manager
+manager_ip=172.17.0.2
+manager_subnet=172.17.0.0/16
+manager_asn=64500
+manager_bridge=docker0
+
+# BGP configuration (manager only)
+bgp_enabled=true
+bgp_router_id_base=1.1.1
+
+EOF
+    
+    # Configure each node with defaults optimized for tailf_hcc
+    echo "Configuring nodes with tailf_hcc defaults..."
+    for ((i=1; i<=num_nodes; i++)); do
+        echo ""
+        echo "--- Node $i ---"
+        
+        local default_name="${DEFAULT_NODE_NAMES[$((i-1))]}"
+        read -p "Node $i name [$default_name]: " node_name
+        node_name="${node_name:-$default_name}"
+        
+        local default_asn=$((DEFAULT_ASN_BASE + i))
+        read -p "Node $i ASN [$default_asn]: " node_asn
+        node_asn="${node_asn:-$default_asn}"
+        
+        local default_subnet=$((30 + i - 1))
+        local default_ip=$((96 + i))
+        read -p "Node $i subnet [192.168.$default_subnet.0/24]: " node_subnet
+        node_subnet="${node_subnet:-192.168.$default_subnet.0/24}"
+        
+        read -p "Node $i IP [192.168.$default_subnet.$default_ip]: " node_ip
+        node_ip="${node_ip:-192.168.$default_subnet.$default_ip}"
+        
+        cat >> "$output_file" << EOF
+# Node $i - ${node_name^}
+node_${i}_name=$node_name
+node_${i}_ip=$node_ip
+node_${i}_subnet=$node_subnet
+node_${i}_asn=$node_asn
+node_${i}_hostname=$node_name.cluster.local
+
+EOF
+    done
+    
+    # Add inter-node connectivity section
+    cat >> "$output_file" << EOF
+# Inter-node connectivity (manager has BGP, workers have direct connection)
+connect_manager_berlin=direct
+connect_manager_london=direct
+connect_manager_paris=direct
+
+# NSO settings
+ssl_enabled=true
+ssl_cert_dir=
+ncs_flags=
+host=localhost.localdomain
+env_sh_path=$ENV_SH_PATH
 
 # Timeouts
 timeout=30
