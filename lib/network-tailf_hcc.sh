@@ -162,18 +162,27 @@ setup_l3bgp_nso_packages() {
     fi
     
     # Create package links and HCC config files in each NSO node
+    log_debug "Starting loop for $NODES nodes (NODES variable = '$NODES')"
+    local i
     for ((i=1; i<=NODES; i++)); do
+        log_debug "Loop iteration $i: Processing node $i (max=$NODES)"
         local packages_dir="${WORK_DIR}/ncs-run${i}/packages"
         local hcc_link="${packages_dir}/tailf-hcc"
         
+        log_debug "Checking if package link exists: $hcc_link"
         if [[ ! -L "$hcc_link" ]]; then
             log_info "Creating tailf-hcc package link for node $i"
             execute_cmd "ln -sf $hcc_dir $hcc_link"
+        else
+            log_debug "Package link already exists for node $i"
         fi
         
         # Generate HCC XML configuration for this node
+        log_debug "About to generate HCC config for node $i"
         generate_hcc_config "$i"
+        log_debug "Completed HCC config for node $i"
     done
+    log_debug "Completed loop for all nodes"
 }
 
 # Generate HCC XML configuration for a node
@@ -182,24 +191,6 @@ generate_hcc_config() {
     local node_dir="${WORK_DIR}/ncs-run${node_id}"
     local hcc_config="${node_dir}/hcc.xml"
     
-    # Get node configuration
-    local node_ip=$(get_node_ip "$node_id")
-    local node_hostname=$(get_node_hostname "$node_id")
-    local node_subnet=$(get_node_subnet "$node_id")
-    local node_asn
-    eval node_asn="\$NODE_${node_id}_ASN"
-    
-    # Generate the correct node-id format: ncsd{node_id}@tailf_hcc{node_id}.ha-cluster
-    local hcc_node_id="ncsd${node_id}@tailf_hcc${node_id}.ha-cluster"
-    
-    # Extract the manager IP for neighbor configuration
-    local manager_ip="${MANAGER_IP:-172.17.0.2}"
-    local manager_subnet_ip
-    
-    # Calculate manager IP in this node's subnet (e.g., 192.168.30.2 for node 1)
-    local subnet_base=$(echo "$node_subnet" | cut -d'.' -f1-3)
-    manager_subnet_ip="${subnet_base}.2"
-    
     log_info "Generating HCC config for node $node_id: $hcc_config"
     
     if [[ "${DRY_RUN}" != "true" ]]; then
@@ -207,6 +198,25 @@ generate_hcc_config() {
 <config xmlns="http://tail-f.com/ns/config/1.0">
   <hcc xmlns="http://cisco.com/pkg/tailf-hcc">
     <bgp>
+EOF
+
+        # Generate configuration for ALL nodes in this file
+        local i
+        for ((i=1; i<=NODES; i++)); do
+            local node_ip=$(get_node_ip "$i")
+            local node_hostname=$(get_node_hostname "$i")
+            local node_subnet=$(get_node_subnet "$i")
+            local node_asn
+            eval node_asn="\$NODE_${i}_ASN"
+            
+            # Calculate manager IP in this node's subnet (e.g., 192.168.30.2 for node 1)
+            local subnet_base=$(echo "$node_subnet" | cut -d'.' -f1-3)
+            local manager_subnet_ip="${subnet_base}.2"
+            
+            # Generate HCC node ID
+            local hcc_node_id="ncsd${i}@tailf_hcc${i}.ha-cluster"
+            
+            cat >> "$hcc_config" << EOF
       <node>
         <node-id>$hcc_node_id</node-id>
         <enabled>true</enabled>
@@ -219,25 +229,30 @@ generate_hcc_config() {
         </neighbor>
 EOF
 
-        # Add neighbor entries for other nodes (full mesh BGP peering)
-        for ((j=1; j<=NODES; j++)); do
-            if [[ $j -ne $node_id ]]; then
-                local peer_ip=$(get_node_ip "$j")
-                local peer_asn
-                eval peer_asn="\$NODE_${j}_ASN"
-                
-                cat >> "$hcc_config" << EOF
+            # Add neighbor entries for other nodes (full mesh BGP peering)
+            local j
+            for ((j=1; j<=NODES; j++)); do
+                if [[ $j -ne $i ]]; then
+                    local peer_ip=$(get_node_ip "$j")
+                    local peer_asn
+                    eval peer_asn="\$NODE_${j}_ASN"
+                    
+                    cat >> "$hcc_config" << EOF
         <neighbor>
           <address>$peer_ip</address>
           <as>$peer_asn</as>
           <enabled>true</enabled>
         </neighbor>
 EOF
-            fi
-        done
-        
-        cat >> "$hcc_config" << EOF
+                fi
+            done
+            
+            cat >> "$hcc_config" << EOF
       </node>
+EOF
+        done
+
+        cat >> "$hcc_config" << EOF
     </bgp>
   </hcc>
 </config>
@@ -277,6 +292,7 @@ neighbors:
 EOF
 
     # Add all nodes as neighbors with simplified config
+    local i
     for ((i=1; i<=NODES; i++)); do
         local node_ip="$(eval echo \$NODE_${i}_IP)"
         local node_asn="$(eval echo \$NODE_${i}_ASN)"
