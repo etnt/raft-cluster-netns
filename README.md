@@ -80,7 +80,7 @@ The script also supports a Tailf-HCC topology designed for scenarios where BGP r
 
 ```bash
 # Generate Tailf-HCC configuration file
-./raft-cluster-netns.sh configure --auto --type tailf_hcc -n 3
+./raft-cluster-netns.sh configure --auto --type tailf_hcc
 
 # Setup cluster using the generated Tailf-HCC configuration
 ./raft-cluster-netns.sh setup -c .raft-cluster.conf
@@ -100,13 +100,53 @@ The script also supports a Tailf-HCC topology designed for scenarios where BGP r
 - Direct routing from worker nodes to manager
 - Full network connectivity without worker-node routing complexity
 
+So oone way to check that the BGP advertisment really works is to
+check the routing table in the Manager namespace and compare what
+happens when you do a HA-Raft handover to another node.
+
+So let's say the node: `ncsd3@tailf_hcc3.ha-cluster` is the leader
+and it is running on the "host": 192.168.32.99, the VIP is set to: 192.168.22.22 .
+
+We can check the routing table at the Manager node (namespace):
+```bash
+❯ sudo ip netns exec tailf_hccmanager ip route show
+172.17.0.0/16 dev tailf_hccmgra proto kernel scope link src 172.17.0.2
+192.168.22.22 nhid 14 via 192.168.32.99 dev tailf_hccmgra proto bgp metric 20
+192.168.30.0/24 dev tailf_hccmgra proto kernel scope link src 192.168.30.2
+192.168.31.0/24 dev tailf_hccmgra proto kernel scope link src 192.168.31.2
+192.168.32.0/24 dev tailf_hccmgra proto kernel scope link src 192.168.32.2
+```
+
+We can see that the VIP is routed via the `ncsd3` node.
+
+Now let's do a handover to: `ncsd1@tailf_hcc1.ha-cluster`
+
+```bash
+admin@ncs> request ha-raft handover to-member ncsd1@tailf_hcc1.ha-cluster
+[ok][2025-09-10 14:09:51]
+```
+
+Again, check the routing table at the Manager node.
+
+```bash
+❯ sudo ip netns exec tailf_hccmanager ip route show
+172.17.0.0/16 dev tailf_hccmgra proto kernel scope link src 172.17.0.2
+192.168.22.22 nhid 16 via 192.168.30.97 dev tailf_hccmgra proto bgp metric 20
+192.168.30.0/24 dev tailf_hccmgra proto kernel scope link src 192.168.30.2
+192.168.31.0/24 dev tailf_hccmgra proto kernel scope link src 192.168.31.2
+192.168.32.0/24 dev tailf_hccmgra proto kernel scope link src 192.168.32.2
+```
+
+As you can see, it has been updated via BGP with the new location for the VIP,
+now via 192.168.30.97 .
+
 ### L3 BGP Topology Configuration
 
 The script supports advanced L3 BGP topology generation for testing complex network scenarios:
 
 ```bash
 # Generate L3 BGP configuration file
-./raft-cluster-netns.sh configure --auto --type l3bgp -n 5
+./raft-cluster-netns.sh configure --auto --type l3bgp
 
 # Setup cluster using the generated BGP configuration
 ./raft-cluster-netns.sh setup
