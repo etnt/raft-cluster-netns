@@ -222,6 +222,144 @@ $ sudo chown root /usr/bin/gobgpd
 $ sudo chmod u+s /usr/bin/gobgpd
 ```
 
+## Example run: using tailf-hcc and ha-raft
+
+```bash
+# NOTE THE VIP: 192.168.30.55 CURRENTLY SETUP ON NODE 1
+✦ ❯ ./raft-cluster-netns.sh exec 1 "ip a ls"
+[INFO] Parsing tailf_hcc configuration...
+sudo: unable to resolve host ubuntu24-desktop: Temporary failure in name resolution
+1: lo: <LOOPBACK,UP,LOWER_UP> mtu 65536 qdisc noqueue state UNKNOWN group default qlen 1000
+    link/loopback 00:00:00:00:00:00 brd 00:00:00:00:00:00
+    inet 127.0.0.1/8 scope host lo
+       valid_lft forever preferred_lft forever
+    inet 192.168.30.55/32 scope global lo                 <<<==== VIP !!
+       valid_lft forever preferred_lft forever
+    inet6 ::1/128 scope host
+       valid_lft forever preferred_lft forever
+945: tailf_hcc1a@if944: <BROADCAST,MULTICAST,UP,LOWER_UP> mtu 1500 qdisc noqueue state UP group default qlen 1000
+    link/ether 8e:d7:45:eb:16:98 brd ff:ff:ff:ff:ff:ff link-netnsid 0
+    inet 192.168.30.97/24 scope global tailf_hcc1a
+       valid_lft forever preferred_lft forever
+    inet6 fe80::8cd7:45ff:feeb:1698/64 scope link
+       valid_lft forever preferred_lft forever
+
+
+✦ ❯ ping 192.168.30.55
+PING 192.168.30.55 (192.168.30.55) 56(84) bytes of data.
+64 bytes from 192.168.30.55: icmp_seq=1 ttl=64 time=0.307 ms
+64 bytes from 192.168.30.55: icmp_seq=2 ttl=64 time=0.052 ms
+^C
+--- 192.168.30.55 ping statistics ---
+2 packets transmitted, 2 received, 0% packet loss, time 1047ms
+rtt min/avg/max/mdev = 0.052/0.179/0.307/0.127 ms
+
+# STOP NSO AT NODE 1
+✦ ❯ ./raft-cluster-netns.sh exec 1 "ncs --stop"
+[INFO] Parsing tailf_hcc configuration...
+sudo: unable to resolve host ubuntu24-desktop: Temporary failure in name resolution
+
+# WE GET A REDIRECT FROM NODE 1 !
+✦ ❯ ping 192.168.30.55
+PING 192.168.30.55 (192.168.30.55) 56(84) bytes of data.
+From 192.168.30.97: icmp_seq=1 Redirect Host(New nexthop: 192.168.30.55)
+64 bytes from 192.168.30.55: icmp_seq=1 ttl=64 time=0.532 ms
+From 192.168.30.97: icmp_seq=2 Redirect Host(New nexthop: 192.168.30.55)
+64 bytes from 192.168.30.55: icmp_seq=2 ttl=64 time=0.101 ms
+From 192.168.30.97: icmp_seq=3 Redirect Host(New nexthop: 192.168.30.55)
+64 bytes from 192.168.30.55: icmp_seq=3 ttl=64 time=0.100 ms
+^C
+--- 192.168.30.55 ping statistics ---
+3 packets transmitted, 3 received, 0% packet loss, time 2039ms
+rtt min/avg/max/mdev = 0.100/0.244/0.532/0.203 ms
+
+# THE VIP IS GONE AT NODE 1 !
+✦ ❯ ./raft-cluster-netns.sh exec 1 "ip a ls"
+[INFO] Parsing tailf_hcc configuration...
+sudo: unable to resolve host ubuntu24-desktop: Temporary failure in name resolution
+1: lo: <LOOPBACK,UP,LOWER_UP> mtu 65536 qdisc noqueue state UNKNOWN group default qlen 1000
+    link/loopback 00:00:00:00:00:00 brd 00:00:00:00:00:00
+    inet 127.0.0.1/8 scope host lo
+       valid_lft forever preferred_lft forever
+    inet6 ::1/128 scope host
+       valid_lft forever preferred_lft forever
+945: tailf_hcc1a@if944: <BROADCAST,MULTICAST,UP,LOWER_UP> mtu 1500 qdisc noqueue state UP group default qlen 1000
+    link/ether 8e:d7:45:eb:16:98 brd ff:ff:ff:ff:ff:ff link-netnsid 0
+    inet 192.168.30.97/24 scope global tailf_hcc1a
+       valid_lft forever preferred_lft forever
+    inet6 fe80::8cd7:45ff:feeb:1698/64 scope link
+       valid_lft forever preferred_lft forever
+
+# NO VIP AT NODE 2 ...
+✦ ❯ ./raft-cluster-netns.sh exec 2 "ip a ls"
+[INFO] Parsing tailf_hcc configuration...
+sudo: unable to resolve host ubuntu24-desktop: Temporary failure in name resolution
+1: lo: <LOOPBACK,UP,LOWER_UP> mtu 65536 qdisc noqueue state UNKNOWN group default qlen 1000
+    link/loopback 00:00:00:00:00:00 brd 00:00:00:00:00:00
+    inet 127.0.0.1/8 scope host lo
+       valid_lft forever preferred_lft forever
+    inet6 ::1/128 scope host
+       valid_lft forever preferred_lft forever
+947: tailf_hcc2a@if946: <BROADCAST,MULTICAST,UP,LOWER_UP> mtu 1500 qdisc noqueue state UP group default qlen 1000
+    link/ether ce:07:36:d9:e5:3a brd ff:ff:ff:ff:ff:ff link-netnsid 0
+    inet 192.168.31.98/24 scope global tailf_hcc2a
+       valid_lft forever preferred_lft forever
+    inet6 fe80::cc07:36ff:fed9:e53a/64 scope link
+       valid_lft forever preferred_lft forever
+
+# HERE WE FIND THE VIP, AT NODE 3
+✦ ❯ ./raft-cluster-netns.sh exec 3 "ip a ls"
+[INFO] Parsing tailf_hcc configuration...
+sudo: unable to resolve host ubuntu24-desktop: Temporary failure in name resolution
+1: lo: <LOOPBACK,UP,LOWER_UP> mtu 65536 qdisc noqueue state UNKNOWN group default qlen 1000
+    link/loopback 00:00:00:00:00:00 brd 00:00:00:00:00:00
+    inet 127.0.0.1/8 scope host lo
+       valid_lft forever preferred_lft forever
+    inet6 ::1/128 scope host
+       valid_lft forever preferred_lft forever
+949: tailf_hcc3a@if948: <BROADCAST,MULTICAST,UP,LOWER_UP> mtu 1500 qdisc noqueue state UP group default qlen 1000
+    link/ether e2:c4:18:f1:a0:59 brd ff:ff:ff:ff:ff:ff link-netnsid 0
+    inet 192.168.32.99/24 scope global tailf_hcc3a
+       valid_lft forever preferred_lft forever
+    inet 192.168.30.55/32 scope global tailf_hcc3a           <<<=== VIP !!
+       valid_lft forever preferred_lft forever
+    inet6 fe80::e0c4:18ff:fef1:a059/64 scope link
+       valid_lft forever preferred_lft forever
+
+# CHECK THE HA-RAFT STATUS ON NODE 3
+❯ ./raft-cluster-netns.sh exec 3 "ncs_cli -u admin"
+[INFO] Parsing tailf_hcc configuration...
+sudo: unable to resolve host ubuntu24-desktop: Temporary failure in name resolution
+
+admin connected from 127.0.0.1 using console on ubuntu24-desktop
+admin@ncs> show ha-raft
+ha-raft status role leader
+ha-raft status leader ncsd3@tailf_hcc3.ha-cluster
+ha-raft status member [ ncsd1@tailf_hcc1.ha-cluster ncsd2@tailf_hcc2.ha-cluster ncsd3@tailf_hcc3.ha-cluster ]
+ha-raft status connected-node [ ncsd2@tailf_hcc2.ha-cluster ]
+ha-raft status local-node ncsd3@tailf_hcc3.ha-cluster
+SERIAL
+NUMBER  EXPIRATION DATE            FILE PATH
+-----------------------------------------------------------------------------------------------------------------------------------------
+0105    2025-10-27T21:26:48+01:00  /home/ttornkvi/git/raft-cluster-netns/work_dir/ncs-run3/../erldist/ssl/ca1/certs/tailf_hcc3_cert.pem
+
+SERIAL
+NUMBER  EXPIRATION DATE            FILE PATH
+------------------------------------------------------------------------------------------------------------------------
+FF      2025-10-27T21:26:47+01:00  /home/ttornkvi/git/raft-cluster-netns/work_dir/ncs-run3/../erldist/ssl/ca1/cert.pem
+
+ha-raft status log current-index 53
+ha-raft status log applied-index 53
+ha-raft status log num-entries 12
+NODE                         STATE    INDEX  LAG
+--------------------------------------------------
+ncsd2@tailf_hcc2.ha-cluster  in-sync  53     0
+
+ha-raft status passive false
+[ok][2025-09-10 08:35:31]
+admin@ncs>  
+```
+
 ## Troubleshooting: Downgrading GoBGP and FRR
 
 Newer versions of GoBGP (≥ 3.x) and FRR (≥ 8.4.x) introduced changes in
