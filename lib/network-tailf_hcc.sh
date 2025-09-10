@@ -1,6 +1,33 @@
 #!/bin/bash
-# tailf_hcc network configuration
-# Similar to L3BGP but only manager node has BGP/Zebra
+# tailf_hcc network topology module
+# Extends L3BGP network with tailf-hcc specific BGP configuration and HCC package integration
+#
+# This module builds on the L3BGP infrastructure but restricts BGP/Zebra daemons to
+# the manager node only. NSO nodes get identical HCC XML configuration files that 
+# define BGP neighbors including the manager and all other cluster nodes.
+#
+# OVERRIDE FUNCTIONS (modify L3BGP behavior):
+#   start_gobgp_daemons()       - Start GoBGP only on manager node (not cluster nodes)
+#   start_zebra_daemons()       - Start Zebra only on manager node (not cluster nodes)  
+#   cleanup_l3bgp_processes()   - Cleanup only manager node BGP/Zebra processes
+#   create_manager_gobgp_config() - Create simplified manager GoBGP config (no transport)
+#
+# TAILF_HCC SPECIFIC FUNCTIONS:
+#   setup_l3bgp_nso_packages()  - Setup NSO packages with tailf-hcc package links
+#   generate_hcc_config()       - Generate identical HCC XML config for all nodes
+#   get_manager_node()          - Helper to identify manager node name
+#
+# HCC CONFIGURATION:
+#   - Each node gets identical hcc.xml containing ALL cluster nodes
+#   - BGP neighbors include: manager node + all other cluster nodes  
+#   - Uses correct namespace format for NSO RAFT cluster addressing
+#   - ASN assignments follow node-specific configuration
+#
+# ARCHITECTURE DIFFERENCES FROM L3BGP:
+#   - BGP/Zebra daemons: Manager node only (vs all nodes in L3BGP)
+#   - HCC configuration: Generated for NSO cluster BGP coordination
+#   - Network topology: Same L3 subnets but different BGP participation
+#   - Use case: NSO HA cluster with HCC package BGP management
 
 # Source the L3BGP functions since tailf_hcc builds on top of it
 source "$SCRIPT_DIR/lib/network-l3bgp.sh"

@@ -1,5 +1,74 @@
 #!/bin/bash
 
+# NSO RAFT Cluster Virtual Network Setup and Management Tool
+# Creates isolated network namespaces for NSO RAFT cluster testing with multiple network topologies
+#
+# This script provides a complete environment for testing NSO RAFT clusters by creating
+# isolated network namespaces, setting up SSL certificates, configuring NSO nodes,
+# and enabling network partition testing for distributed system validation.
+#
+# SUPPORTED NETWORK TOPOLOGIES:
+#   simple    - Basic bridge network (default)
+#   l3bgp     - L3 BGP with FRR Zebra + GoBGP on all nodes
+#   tailf_hcc - L3 BGP with manager-only routing + HCC package integration
+#
+# MAIN COMMANDS:
+#   configure  - Interactive configuration wizard to create setup files
+#   setup      - Create complete environment (network + NSO + SSL)
+#   start      - Start NSO nodes in existing environment
+#   stop       - Stop NSO nodes (preserve network/config)
+#   cleanup    - Remove complete environment (network + NSO + SSL)
+#   status     - Show current cluster and node status
+#
+# NETWORK TESTING COMMANDS:
+#   test       - Test basic network connectivity between nodes
+#   isolate    - Isolate specific node from network
+#   partition  - Create network partition between node groups
+#   heal       - Heal network partitions (all or specific nodes)
+#
+# UTILITY COMMANDS:
+#   shell      - Enter bash shell in specific node namespace
+#   exec       - Execute command in specific node namespace
+#   help       - Show detailed usage information
+#
+# CONFIGURATION MANAGEMENT:
+#   - Uses configuration files (.raft-cluster.conf) for environment persistence
+#   - Supports auto-detection of NSO environment (env.sh, ncsrc, etc.)
+#   - Command-line options override configuration file settings
+#   - Interactive wizard for first-time setup
+#
+# MODULAR ARCHITECTURE:
+#   lib/common.sh           - Core utilities, logging, and shared functions
+#   lib/network-simple.sh   - Basic bridge network implementation
+#   lib/network-l3bgp.sh    - L3 BGP network with FRR Zebra + GoBGP
+#   lib/network-tailf_hcc.sh - HCC-specific BGP configuration extension
+#
+# MAIN FUNCTION CATEGORIES:
+#   Configuration Management: load_config_file(), save_config_file(), run_configure_wizard()
+#   Environment Setup: setup_environment(), setup_nso_environment(), check_prerequisites()
+#   Network Management: setup_network(), cleanup_network() [delegates to topology modules]
+#   NSO Node Management: setup_nso_nodes(), start_nso_nodes(), stop_nso_nodes(), cleanup_nso_nodes()
+#   SSL Certificate Management: setup_ssl_certificates(), cleanup_ssl_certificates()
+#   Network Testing: test_connectivity(), isolate_node(), create_partition(), heal_partition()
+#   Status and Debugging: show_status(), show_nso_status(), show_partition_status()
+#   Namespace Operations: enter_namespace_shell(), exec_in_namespace()
+#
+# USAGE EXAMPLES:
+#   # Interactive setup
+#   ./raft-cluster-netns.sh configure --auto --type l3bgp --output myconf.conf
+#   ./raft-cluster-netns.sh setup -c myconf.conf
+#
+#   # Manual setup
+#   ./raft-cluster-netns.sh setup --nodes 3 --type tailf_hcc --cluster-name test
+#
+#   # Network partition testing
+#   ./raft-cluster-netns.sh partition 1,2    # Isolate nodes 1,2 from node 3
+#   ./raft-cluster-netns.sh heal             # Restore full connectivity
+#
+#   # Node management
+#   ./raft-cluster-netns.sh shell 1          # Enter node 1 namespace
+#   ./raft-cluster-netns.sh exec 1 "ncs_cli -u admin"  # Run CLI on node 1
+
 # RAFT Cluster Virtual Network Setup Script
 # Creates isolated network namespaces for NSO RAFT cluster testing
 
