@@ -100,7 +100,7 @@ The script also supports a Tailf-HCC topology designed for scenarios where BGP r
 - Direct routing from worker nodes to manager
 - Full network connectivity without worker-node routing complexity
 
-So oone way to check that the BGP advertisment really works is to
+So one way to check that the BGP advertisment really works is to
 check the routing table in the Manager namespace and compare what
 happens when you do a HA-Raft handover to another node.
 
@@ -119,7 +119,7 @@ We can check the routing table at the Manager node (namespace):
 
 We can see that the VIP is routed via the `ncsd3` node.
 
-Now let's do a handover to: `ncsd1@tailf_hcc1.ha-cluster`
+Now let's do a handover to: `ncsd1@tailf_hcc1.ha-cluster` (192.168.30.97).
 
 ```bash
 admin@ncs> request ha-raft handover to-member ncsd1@tailf_hcc1.ha-cluster
