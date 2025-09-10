@@ -1815,7 +1815,7 @@ enter_namespace_shell() {
 
     local user_name=$(id -un)
     local user_home=$(getent passwd "$user_name" | cut -d: -f6)
-    local start_dir="$PWD"
+    local start_dir="${WORK_DIR}/ncs-run${node_id}"
 
     # Create a temporary init file for the shell
     local init_file=$(mktemp)
