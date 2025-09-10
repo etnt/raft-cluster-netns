@@ -17,6 +17,18 @@ cluster testing environments using Linux network namespaces. It provides:
 - **Management & Debugging**: Interactive shells, command execution, and comprehensive status reporting
 - **Developer-Friendly**: Dry-run mode, verbose logging, and configuration persistence
 
+### Side note: Linux Namespaces, what's that?
+
+Linux namespaces are kernel features that provide lightweight isolation by
+giving processes their own separate view of global resources (PID, mount, UTS,
+IPC, user, cgroup, network).
+
+Network namespace isolates network-related resources so a process group has
+its own network stack — separate interfaces, IP addresses, routing tables,
+firewall rules, and sockets. Processes in different network namespaces cannot
+see or use each other’s network interfaces unless explicit links (veth pairs)
+or shared configuration are created.
+
 ## Quick Start
 
 ### Basic Setup
