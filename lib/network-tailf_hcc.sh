@@ -214,7 +214,7 @@ generate_hcc_config() {
         <router-id>$node_ip</router-id>
         <neighbor>
           <address>$manager_subnet_ip</address>
-          <as>\${MANAGER_ASN:-64500}</as>
+          <as>${MANAGER_ASN:-64500}</as>
           <enabled>true</enabled>
         </neighbor>
 EOF
@@ -245,4 +245,45 @@ EOF
     else
         log_debug "[DRY-RUN] Would generate HCC config: $hcc_config"
     fi
+}
+
+# Override manager GoBGP config generation for tailf_hcc
+create_manager_gobgp_config() {
+    local manager_ip="$1"
+    local manager_asn="$2"
+    local config_file="$3"
+    
+    log_debug "Creating tailf_hcc manager GoBGP config: $config_file"
+    
+    if [[ "${DRY_RUN}" == "true" ]]; then
+        log_debug "[DRY-RUN] Would create tailf_hcc manager GoBGP config: $config_file"
+        return 0
+    fi
+    
+    local mgr_zebra_socket="/var/run/frr-${PREFIX}manager/zserv.api"
+    
+    cat > "$config_file" << EOF
+global:
+  config:
+    as: $manager_asn
+    router-id: $manager_ip
+
+zebra:
+  config:
+    enabled: true
+    url: unix:$mgr_zebra_socket
+
+neighbors:
+EOF
+
+    # Add all nodes as neighbors with simplified config
+    for ((i=1; i<=NODES; i++)); do
+        local node_ip="$(eval echo \$NODE_${i}_IP)"
+        local node_asn="$(eval echo \$NODE_${i}_ASN)"
+        cat >> "$config_file" << EOF
+  - config:
+      neighbor-address: $node_ip
+      peer-as: $node_asn
+EOF
+    done
 }
