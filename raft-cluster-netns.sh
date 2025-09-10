@@ -1866,7 +1866,7 @@ exec_in_namespace() {
     log_debug "Executing in $netns: $cmd"
 
     local user_name=$(id -un)
-    local start_dir="$PWD"
+    local start_dir="${WORK_DIR}/ncs-run${node_id}"
     sudo ip netns exec "$netns" sudo -u "$user_name" bash -c "
         $env_source
         cd '$start_dir'
