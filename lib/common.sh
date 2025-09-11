@@ -1,5 +1,56 @@
 #!/bin/bash
 # Common utilities for RAFT cluster management
+# Core shared functions used across all network topology modules and main script
+#
+# This module provides essential utilities for logging, command execution, validation,
+# and network cleanup operations. All other modules depend on these foundational
+# functions for consistent behavior across different network topologies.
+#
+# LOGGING FUNCTIONS:
+#   log_info()              - Display informational messages with green [INFO] prefix
+#   log_warn()              - Display warning messages with yellow [WARN] prefix (stderr)
+#   log_error()             - Display error messages with red [ERROR] prefix (stderr)
+#   log_debug()             - Display debug messages with blue [DEBUG] prefix (verbose mode only)
+#
+# COMMAND EXECUTION:
+#   execute_cmd()           - Execute commands with logging and dry-run support
+#                            Supports verbose output and DRY_RUN mode for testing
+#
+# VALIDATION FUNCTIONS:
+#   validate_parameters()   - Validate global parameters (PREFIX, NODES) for security
+#   command_exists()        - Check if a command is available in PATH
+#   check_basic_prerequisites() - Verify required system commands (ip, sudo, etc.)
+#
+# NETWORK UTILITY FUNCTIONS:
+#   fix_dockers_mess()      - Check for Docker network conflicts with 192.168.x.x ranges
+#   add_hosts_to_namespace() - Install custom hosts file in network namespace
+#   remove_hosts_from_namespace() - Remove hosts file from network namespace
+#
+# CLEANUP FUNCTIONS:
+#   delete_veth_pairs()     - Remove virtual ethernet pairs for all nodes
+#   delete_namespaces()     - Remove network namespaces and associated resources
+#   cleanup_bridge()        - Remove bridge network and disconnect interfaces
+#
+# GLOBAL VARIABLES USED:
+#   PREFIX                  - Namespace prefix for all network resources
+#   NODES                   - Number of cluster nodes
+#   BRIDGE_NAME            - Name of bridge network interface
+#   WORK_DIR               - Working directory for generated files
+#   VERBOSE                - Enable debug logging when true
+#   DRY_RUN                - Enable dry-run mode when true (commands logged but not executed)
+#
+# SECURITY FEATURES:
+#   - Parameter validation prevents path traversal attacks
+#   - PREFIX restricted to alphanumeric, underscore, and hyphen characters
+#   - All privileged operations use sudo with explicit commands
+#
+# COLOR SCHEME:
+#   GREEN   - Informational messages and success indicators
+#   YELLOW  - Warning messages and non-critical issues
+#   RED     - Error messages and failure indicators
+#   BLUE    - Debug messages and detailed operation logs
+
+# Common utilities for RAFT cluster management
 # Shared functions used across all modules
 
 # Colors for output
