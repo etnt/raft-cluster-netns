@@ -231,7 +231,6 @@ EOF
         local i
         for ((i=1; i<=NODES; i++)); do
             local node_ip=$(get_node_ip "$i")
-            local node_hostname=$(get_node_hostname "$i")
             local node_subnet=$(get_node_subnet "$i")
             local node_asn
             eval node_asn="\$NODE_${i}_ASN"

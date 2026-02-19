@@ -176,7 +176,7 @@ load_config_file() {
             manager_enabled) MANAGER_ENABLED="$value" ;;
             manager_ip) MANAGER_IP="$value" ;;
             node_*) 
-                # Handle node-specific configuration (e.g., node_1_ip, node_1_hostname)
+                # Handle node-specific configuration (e.g., node_1_ip, node_1_subnet)
                 log_debug "Setting node variable: $key=$value"
                 declare -g "$key=$value"
                 ;;
@@ -1947,9 +1947,6 @@ exec_in_namespace() {
 # Configuration Generator Functions
 # =============================================================================
 
-# Default node names for auto-generation
-DEFAULT_NODE_NAMES=("berlin" "london" "paris" "tokyo" "sydney" "newyork" "mumbai" "dublin" "singapore" "toronto")
-
 # Default ASN base (will increment from here)
 DEFAULT_ASN_BASE=64510
 
@@ -2047,40 +2044,20 @@ EOF
 
     # Generate node-specific configurations
     for ((i=1; i<=num_nodes; i++)); do
-        local node_name="${DEFAULT_NODE_NAMES[$((i-1))]}"
         local node_asn=$((DEFAULT_ASN_BASE + i))
         local subnet_third=$((30 + i - 1))
         local host_last=$((96 + i))
         
         cat >> "$output_file" << EOF
-# Node $i - ${node_name^}
-node_${i}_name=$node_name
+# Node $i
 node_${i}_ip=192.168.$subnet_third.$host_last
 node_${i}_subnet=192.168.$subnet_third.0/24
 node_${i}_asn=$node_asn
-node_${i}_hostname=$node_name.cluster.local
 
 EOF
     done
     
     cat >> "$output_file" << EOF
-# Inter-node connectivity
-connect_manager_berlin=direct
-connect_manager_london=direct
-connect_manager_paris=direct
-EOF
-
-    # Add BGP peering connections
-    for ((i=1; i<=num_nodes; i++)); do
-        for ((j=i+1; j<=num_nodes; j++)); do
-            local name1="${DEFAULT_NODE_NAMES[$((i-1))]}"
-            local name2="${DEFAULT_NODE_NAMES[$((j-1))]}"
-            echo "connect_${name1}_${name2}=bgp_peering" >> "$output_file"
-        done
-    done
-    
-    cat >> "$output_file" << EOF
-
 # NSO settings
 ssl_enabled=true
 ssl_cert_dir=
@@ -2130,28 +2107,20 @@ EOF
 
     # Generate node-specific configurations
     for ((i=1; i<=num_nodes; i++)); do
-        local node_name="${DEFAULT_NODE_NAMES[$((i-1))]}"
         local node_asn=$((DEFAULT_ASN_BASE + i))
         local subnet_third=$((30 + i - 1))
         local host_last=$((96 + i))
         
         cat >> "$output_file" << EOF
-# Node $i - ${node_name^}
-node_${i}_name=$node_name
+# Node $i
 node_${i}_ip=192.168.$subnet_third.$host_last
 node_${i}_subnet=192.168.$subnet_third.0/24
 node_${i}_asn=$node_asn
-node_${i}_hostname=$node_name.cluster.local
 
 EOF
     done
     
     cat >> "$output_file" << EOF
-# Inter-node connectivity (manager has BGP, workers have direct connection)
-connect_manager_berlin=direct
-connect_manager_london=direct
-connect_manager_paris=direct
-
 # NSO settings
 ssl_enabled=true
 ssl_cert_dir=
@@ -2372,11 +2341,7 @@ EOF
     echo "Configuring nodes with tailf_hcc defaults..."
     for ((i=1; i<=num_nodes; i++)); do
         echo ""
-        echo "--- Node $i ---"
-        
-        local default_name="${DEFAULT_NODE_NAMES[$((i-1))]}"
-        read -p "Node $i name [$default_name]: " node_name
-        node_name="${node_name:-$default_name}"
+        echo "--- Node $i (${prefix}${i}.ha-cluster) ---"
         
         local default_asn=$((DEFAULT_ASN_BASE + i))
         read -p "Node $i ASN [$default_asn]: " node_asn
@@ -2391,23 +2356,15 @@ EOF
         node_ip="${node_ip:-192.168.$default_subnet.$default_ip}"
         
         cat >> "$output_file" << EOF
-# Node $i - ${node_name^}
-node_${i}_name=$node_name
+# Node $i
 node_${i}_ip=$node_ip
 node_${i}_subnet=$node_subnet
 node_${i}_asn=$node_asn
-node_${i}_hostname=$node_name.cluster.local
 
 EOF
     done
     
-    # Add inter-node connectivity section
     cat >> "$output_file" << EOF
-# Inter-node connectivity (manager has BGP, workers have direct connection)
-connect_manager_berlin=direct
-connect_manager_london=direct
-connect_manager_paris=direct
-
 # NSO settings
 ssl_enabled=true
 ssl_cert_dir=
@@ -2486,11 +2443,7 @@ EOF
     echo "Now let's configure each node..."
     for ((i=1; i<=num_nodes; i++)); do
         echo ""
-        echo "--- Node $i ---"
-        
-        local default_name="${DEFAULT_NODE_NAMES[$((i-1))]}"
-        read -p "Node $i name [$default_name]: " node_name
-        node_name="${node_name:-$default_name}"
+        echo "--- Node $i (${prefix}${i}.ha-cluster) ---"
         
         local default_asn=$((DEFAULT_ASN_BASE + i))
         read -p "Node $i ASN [$default_asn]: " node_asn
@@ -2505,17 +2458,14 @@ EOF
         node_ip="${node_ip:-192.168.$default_subnet.$default_ip}"
         
         cat >> "$output_file" << EOF
-# Node $i - ${node_name^}
-node_${i}_name=$node_name
+# Node $i
 node_${i}_ip=$node_ip
 node_${i}_subnet=$node_subnet
 node_${i}_asn=$node_asn
-node_${i}_hostname=$node_name.cluster.local
 
 EOF
     done
     
-    # Add remaining config
     cat >> "$output_file" << EOF
 # NSO settings
 ssl_enabled=true
