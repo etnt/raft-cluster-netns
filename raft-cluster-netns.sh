@@ -55,7 +55,7 @@
 #
 # USAGE EXAMPLES:
 #   # Interactive setup
-#   ./raft-cluster-netns.sh configure --auto --type l3bgp --output myconf.conf
+#   ./raft-cluster-netns.sh configure --type l3bgp --output myconf.conf
 #   ./raft-cluster-netns.sh setup -c myconf.conf
 #
 #   # Manual setup
@@ -85,7 +85,7 @@ DEFAULT_PREFIX="ha"
 DEFAULT_WORK_DIR="$(pwd)/work_dir"
 DEFAULT_CLUSTER_NAME="test-cluster"
 DEFAULT_NETWORK_PREFIX="192.168"
-DEFAULT_NETWORK_TYPE="simple"
+DEFAULT_NETWORK_TYPE="tailf_hcc"
 DEFAULT_BRIDGE_NAME="ha-cluster"
 DEFAULT_SSL_ENABLED="true"
 DEFAULT_TIMEOUT=30
@@ -118,9 +118,9 @@ MANAGER_ENABLED="false"
 MANAGER_IP="172.17.0.2"
 
 # Configure command options
-AUTO_GENERATE=false
+AUTO_GENERATE=true
 CONFIG_OUTPUT=""
-CONFIG_TYPE="simple"
+CONFIG_TYPE="tailf_hcc"
 
 # Source modules
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -1493,15 +1493,14 @@ EXAMPLES:
     $SCRIPT_NAME cleanup --force
 
     # Generate configuration files
-    $SCRIPT_NAME configure --auto                          # Auto-generate simple config
-    $SCRIPT_NAME configure --auto --type l3bgp             # Auto-generate L3 BGP config
-    $SCRIPT_NAME configure --auto --type tailf_hcc         # Auto-generate tailf_hcc config
-    $SCRIPT_NAME configure --auto --nodes 5 --output my.conf
-    $SCRIPT_NAME configure                                  # Interactive wizard
+    $SCRIPT_NAME configure                                  # Auto-generate tailf_hcc config (default)
+    $SCRIPT_NAME configure --nodes 5 --output my.conf      # Auto-generate with 5 nodes
+    $SCRIPT_NAME configure --type l3bgp                    # Auto-generate L3 BGP config
+    $SCRIPT_NAME configure --no-auto                       # Interactive wizard
 
 CONFIGURE OPTIONS:
-    --auto                  Auto-generate configuration (no prompts)
-    --type <type>           Configuration type: simple, l3bgp, tailf_hcc (default: simple)
+    --no-auto               Disable auto-generation, use interactive wizard instead
+    --type <type>           Configuration type: simple, l3bgp, tailf_hcc (default: tailf_hcc)
     --output <file>         Output configuration file (default: .raft-cluster.conf)
     --nodes <count>         Number of nodes for auto-generation
     --force                 Overwrite existing configuration file
@@ -1623,8 +1622,8 @@ parse_args() {
                 FORCE=true
                 shift
                 ;;
-            --auto)
-                AUTO_GENERATE=true
+            --no-auto)
+                AUTO_GENERATE=false
                 shift
                 ;;
             --output)
@@ -2191,7 +2190,7 @@ run_configure_wizard() {
     fi
     
     if [[ "$AUTO_GENERATE" == "true" ]]; then
-        # Auto-generation mode (enabled by --auto flag)
+        # Auto-generation mode (default, disable with --no-auto)
         local num_nodes="${NODES:-3}"
         if [[ -z "$NODES" ]]; then
             read -p "Number of nodes [3]: " num_nodes
@@ -2201,12 +2200,12 @@ run_configure_wizard() {
         local config_type="$CONFIG_TYPE"
         if [[ -z "$config_type" ]]; then
             echo "Configuration type options:"
-            echo "  simple - Traditional flat network (current default)"
+            echo "  simple - Traditional flat network"
             echo "  l3bgp  - Layer 3 BGP with custom subnets and ASNs"
-            echo "  tailf_hcc - Layer 3 BGP with HCC-specific configuration"
+            echo "  tailf_hcc - Layer 3 BGP with HCC-specific configuration (default)"
             echo ""
-            read -p "Configuration type [simple]: " config_type
-            config_type="${config_type:-simple}"
+            read -p "Configuration type [tailf_hcc]: " config_type
+            config_type="${config_type:-tailf_hcc}"
         fi
         
         generate_auto_config "$num_nodes" "$config_type" "$output_file"

@@ -34,8 +34,8 @@ or shared configuration are created.
 ### Basic Setup
 
 ```bash
-# Create (default) config file: .raft_cluster.conf
-./raft-cluster-netns.sh configure --auto --type tailf_hcc
+# Create (default) config file: .raft-cluster.conf
+./raft-cluster-netns.sh configure
 
 # Setup a RAFT cluster according to (default) config file
 ./raft-cluster-netns.sh setup
@@ -74,28 +74,18 @@ or shared configuration are created.
 ./raft-cluster-netns.sh help
 ```
 
-### Tailf-HCC Topology Configuration
-
-The script also supports a Tailf-HCC topology designed for scenarios where BGP routing is centralized on a manager node:
-
-```bash
-# Generate Tailf-HCC configuration file
-./raft-cluster-netns.sh configure --auto --type tailf_hcc
-
-# Setup cluster using the generated Tailf-HCC configuration
-./raft-cluster-netns.sh setup -c .raft-cluster.conf
-```
+### Tailf-HCC Details
 
 **Tailf-HCC features:**
 - **Manager-Only BGP**: BGP and Zebra daemons run only on the manager node
 - **Simplified Worker Nodes**: Worker nodes use direct routing without BGP complexity
 - **Centralized Routing Control**: All routing decisions handled by the manager
-- **Hybrid Topology**: Combines L3BGP benefits with simplified worker configuration
+- **Hybrid Topology**: Combines BGP routing benefits with simplified worker configuration
 - **Resource Efficient**: Reduces resource usage on worker nodes
 
 **Tailf-HCC configuration includes:**
 - A `hcc.xml` config file is created for each node.
-- L3BGP-style network topology with per-node subnets
+- Network topology with per-node subnets
 - BGP/Zebra configuration only on manager node
 - Direct routing from worker nodes to manager
 - Full network connectivity without worker-node routing complexity
@@ -139,33 +129,6 @@ Again, check the routing table at the Manager node.
 
 As you can see, it has been updated via BGP with the new location for the VIP,
 now via 192.168.30.97 .
-
-### L3 BGP Topology Configuration
-
-The script supports advanced L3 BGP topology generation for testing complex network scenarios:
-
-```bash
-# Generate L3 BGP configuration file
-./raft-cluster-netns.sh configure --auto --type l3bgp
-
-# Setup cluster using the generated BGP configuration
-./raft-cluster-netns.sh setup
-```
-
-**L3 BGP features:**
-- **Realistic Network Topologies**: Auto-generates configurations with city-based node names (Berlin, London, Paris, Tokyo, Sydney)
-- **Unique Subnets**: Each node gets its own subnet for true L3 separation
-- **BGP ASN Assignment**: Automatic ASN allocation for BGP peering
-- **Full Mesh Connectivity**: BGP peering relationships between all nodes
-- **Manager Node**: Centralized management node with direct connections
-- **Production-Like Testing**: Simulates real-world distributed environments
-
-**Generated BGP configuration includes:**
-- Node-specific IP subnets (e.g., 192.168.30.0/24 for Berlin)
-- Unique ASN numbers (e.g., AS64511 for Berlin, AS64512 for London)
-- BGP router IDs based on geographic locations
-- Inter-node BGP peering configurations
-- Hostname resolution for realistic multi-site scenarios
 
 ## Installation & Prerequisites
 
@@ -242,8 +205,8 @@ export ENV_SH_PATH="/path/to/your/env.sh"
 | `--cluster-name` | RAFT cluster name | test-cluster |
 | `--network-prefix` | Network address prefix | 192.168 |
 | `--no-ssl` | Disable SSL for Erlang | false (SSL enabled by default) |
-| `--type` | Configuration type (simple, l3bgp, tailf_hcc) | simple |
-| `--auto` | Auto-generate configuration | - |
+| `--type` | Configuration type | tailf_hcc |
+| `--no-auto` | Disable auto-generation, use interactive wizard | - |
 | `--dry-run` | Show commands without executing | - |
 | `-v, --verbose` | Verbose output | - |
 | `-c, --config` | Configuration file | .raft-cluster.conf |
@@ -280,12 +243,11 @@ $ sudo chmod u+s /usr/bin/gobgpd
 # NOTE THE VIP: 192.168.30.55 CURRENTLY SETUP ON NODE 1
 ✦ ❯ ./raft-cluster-netns.sh exec 1 "ip a ls"
 [INFO] Parsing tailf_hcc configuration...
-sudo: unable to resolve host ubuntu24-desktop: Temporary failure in name resolution
 1: lo: <LOOPBACK,UP,LOWER_UP> mtu 65536 qdisc noqueue state UNKNOWN group default qlen 1000
     link/loopback 00:00:00:00:00:00 brd 00:00:00:00:00:00
     inet 127.0.0.1/8 scope host lo
        valid_lft forever preferred_lft forever
-    inet 192.168.30.55/32 scope global lo                 <<<==== VIP !!
+    inet 192.168.30.55/32 scope global lo                 <<<==== NOTE THE VIP !!
        valid_lft forever preferred_lft forever
     inet6 ::1/128 scope host
        valid_lft forever preferred_lft forever
@@ -309,7 +271,6 @@ rtt min/avg/max/mdev = 0.052/0.179/0.307/0.127 ms
 # STOP NSO AT NODE 1
 ✦ ❯ ./raft-cluster-netns.sh exec 1 "ncs --stop"
 [INFO] Parsing tailf_hcc configuration...
-sudo: unable to resolve host ubuntu24-desktop: Temporary failure in name resolution
 
 # WE GET A REDIRECT FROM NODE 1 !
 ✦ ❯ ping 192.168.30.55
@@ -328,7 +289,6 @@ rtt min/avg/max/mdev = 0.100/0.244/0.532/0.203 ms
 # THE VIP IS GONE AT NODE 1 !
 ✦ ❯ ./raft-cluster-netns.sh exec 1 "ip a ls"
 [INFO] Parsing tailf_hcc configuration...
-sudo: unable to resolve host ubuntu24-desktop: Temporary failure in name resolution
 1: lo: <LOOPBACK,UP,LOWER_UP> mtu 65536 qdisc noqueue state UNKNOWN group default qlen 1000
     link/loopback 00:00:00:00:00:00 brd 00:00:00:00:00:00
     inet 127.0.0.1/8 scope host lo
@@ -345,7 +305,6 @@ sudo: unable to resolve host ubuntu24-desktop: Temporary failure in name resolut
 # NO VIP AT NODE 2 ...
 ✦ ❯ ./raft-cluster-netns.sh exec 2 "ip a ls"
 [INFO] Parsing tailf_hcc configuration...
-sudo: unable to resolve host ubuntu24-desktop: Temporary failure in name resolution
 1: lo: <LOOPBACK,UP,LOWER_UP> mtu 65536 qdisc noqueue state UNKNOWN group default qlen 1000
     link/loopback 00:00:00:00:00:00 brd 00:00:00:00:00:00
     inet 127.0.0.1/8 scope host lo
@@ -362,7 +321,6 @@ sudo: unable to resolve host ubuntu24-desktop: Temporary failure in name resolut
 # HERE WE FIND THE VIP, AT NODE 3
 ✦ ❯ ./raft-cluster-netns.sh exec 3 "ip a ls"
 [INFO] Parsing tailf_hcc configuration...
-sudo: unable to resolve host ubuntu24-desktop: Temporary failure in name resolution
 1: lo: <LOOPBACK,UP,LOWER_UP> mtu 65536 qdisc noqueue state UNKNOWN group default qlen 1000
     link/loopback 00:00:00:00:00:00 brd 00:00:00:00:00:00
     inet 127.0.0.1/8 scope host lo
@@ -381,7 +339,6 @@ sudo: unable to resolve host ubuntu24-desktop: Temporary failure in name resolut
 # CHECK THE HA-RAFT STATUS ON NODE 3
 ❯ ./raft-cluster-netns.sh exec 3 "ncs_cli -u admin"
 [INFO] Parsing tailf_hcc configuration...
-sudo: unable to resolve host ubuntu24-desktop: Temporary failure in name resolution
 
 admin connected from 127.0.0.1 using console on ubuntu24-desktop
 admin@ncs> show ha-raft
@@ -492,7 +449,7 @@ vtysh --help       # should show FRR 8.1
 
 ### Overview
 
-One of the most critical aspects of RAFT cluster testing is verifying behavior under network partition scenarios. The script provides comprehensive tools to simulate various types of network failures and split-brain situations.
+One of the most critical aspects of RAFT cluster testing is verifying behavior under network partition scenarios. The script provides tools to simulate various types of network failures and split-brain situations.
 
 ### Partition Types
 
@@ -585,7 +542,7 @@ Example output:
 Node Connectivity Matrix:
   From\To:    Node1   Node2   Node3
     Node1:    SELF     ✓     ✗
-    Node2:     ✓    SELF     ✗  
+    Node2:     ✓    SELF     ✗
     Node3:     ✗     ✗    SELF
 ```
 
@@ -631,103 +588,7 @@ sudo ip link del ha-clusterpart 2>/dev/null || true
 watch -n 1 './raft-cluster-netns.sh exec 1 "ncs_cmd -c \"mget /ha-raft/status/role\""'
 ```
 
-## Network Topology Types
-
-The script supports three different network topology types, each designed for specific testing scenarios:
-
-### Network Type Comparison
-
-| Feature | Simple | L3BGP | Tailf-HCC |
-|---------|--------|-------|-----------|
-| **Complexity** | Low | High | Medium |
-| **Resource Usage** | Minimal | High | Medium |
-| **BGP Routing** | None | All nodes | Manager only |
-| **Subnets** | Single flat | Per-node | Per-node |
-| **Use Case** | Basic testing | Multi-site simulation | Centralized routing |
-| **Setup Time** | Fast | Slow | Medium |
-
-### When to Use Each Type
-
-#### **Simple Network** (`--type simple`)
-**Best for**: Basic RAFT functionality testing, development, quick validation
-
-```bash
-./raft-cluster-netns.sh setup  # Default type
-```
-
-**Characteristics**:
-- Single flat network (192.168.x.1/16)
-- No routing protocols
-- Minimal resource overhead
-- Fast setup and teardown
-- Direct node-to-node communication
-
-#### **L3BGP Network** (`--type l3bgp`)
-**Best for**: Production-like testing, multi-site scenarios, complex routing validation
-
-```bash
-./raft-cluster-netns.sh configure --auto --type l3bgp -n 5
-./raft-cluster-netns.sh setup -c .raft-cluster.conf
-```
-
-**Characteristics**:
-- Each node has its own subnet (192.168.30.0/24, 192.168.31.0/24, etc.)
-- Full BGP mesh between all nodes
-- FRR Zebra + GoBGP on every node
-- Realistic multi-site network simulation
-- Higher resource usage (BGP daemons on all nodes)
-
-#### **Tailf-HCC Network** (`--type tailf_hcc`)
-**Best for**: Hub-and-spoke scenarios, resource-constrained testing, centralized routing architectures
-
-```bash
-./raft-cluster-netns.sh configure --auto --type tailf_hcc -n 3
-./raft-cluster-netns.sh setup -c .raft-cluster.conf
-```
-
-**Characteristics**:
-- Per-node subnets like L3BGP (192.168.30.0/24, 192.168.31.0/24, etc.)
-- BGP/Zebra only on manager node
-- Worker nodes use simple routing through manager
-- Reduced resource usage compared to L3BGP
-- Simulates centralized routing control scenarios
-
-### Choosing the Right Type
-
-```bash
-# For basic RAFT testing and development
-./raft-cluster-netns.sh setup
-
-# For testing distributed network scenarios with full BGP mesh
-./raft-cluster-netns.sh configure --auto --type l3bgp -n 5
-./raft-cluster-netns.sh setup -c .raft-cluster.conf
-
-# For testing hub-and-spoke architectures with centralized routing
-./raft-cluster-netns.sh configure --auto --type tailf_hcc -n 3
-./raft-cluster-netns.sh setup -c .raft-cluster.conf
-```
-
-### Example: Default Network Layout
-
-```
-Host Network
-├── Bridge: ha-cluster (192.168.0.254/16)
-│
-├── Node 1 Namespace (ha1ns)
-│   ├── IP: 192.168.1.1/16
-│   ├── Hostname: ha1.ha-cluster
-│   └── NSO Node: ncsd1@ha1.ha-cluster
-│
-├── Node 2 Namespace (ha2ns)
-│   ├── IP: 192.168.2.1/16  
-│   ├── Hostname: ha2.ha-cluster
-│   └── NSO Node: ncsd2@ha2.ha-cluster
-│
-└── Node 3 Namespace (ha3ns)
-    ├── IP: 192.168.3.1/16
-    ├── Hostname: ha3.ha-cluster
-    └── NSO Node: ncsd3@ha3.ha-cluster
-```
+## Configuration
 
 ### Configuration File Format
 
@@ -740,7 +601,7 @@ cluster_name=my-production-cluster
 prefix=prod
 work_dir=/tmp/raft-testing
 
-# Network settings  
+# Network settings
 network_prefix=10.0
 bridge_name=prod-cluster
 
@@ -758,7 +619,7 @@ host=prod.example.com
 ### Configuration Precedence
 
 1. **Command-line arguments** (highest priority)
-2. **Configuration file** 
+2. **Configuration file**
 3. **Built-in defaults** (lowest priority)
 
 
@@ -796,7 +657,7 @@ For each node, the script creates:
 ```
 
 #### "Device already exists" errors
-**Problem**: Previous setup not cleaned up  
+**Problem**: Previous setup not cleaned up
 **Solution**: Force cleanup before retrying
 ```bash
 ./raft-cluster-netns.sh cleanup --force
@@ -804,18 +665,18 @@ For each node, the script creates:
 ```
 
 #### Network connectivity failures
-**Problem**: Firewall blocking traffic  
+**Problem**: Firewall blocking traffic
 **Solution**: Check iptables rules or Docker interference
 ```bash
 sudo iptables --policy FORWARD ACCEPT
 ```
 
 #### RAFT cluster communication issues
-**Problem**: NSO nodes cannot form RAFT cluster  
+**Problem**: NSO nodes cannot form RAFT cluster
 **Solution**: Verify hostname resolution and node addresses
 ```bash
 # Check if hostnames resolve correctly
-./raft-cluster-netns.sh exec 1 "ping -c 1 ha2.ha-cluster"
+./raft-cluster-netns.sh exec 1 "ping -c 1 tailf_hcc2.ha-cluster"
 
 # Verify NSO configuration has correct hostnames
 grep -A 5 "<node-address>" ncs-run*/ncs.conf
@@ -861,116 +722,6 @@ done
 Use verbose mode for detailed troubleshooting:
 ```bash
 ./raft-cluster-netns.sh setup --verbose --dry-run
-```
-
-### L3BGP Network Connectivity Issues
-
-#### Bridge netfilter blocking traffic
-**Problem**: Bridge traffic being filtered by iptables, causing connectivity failures  
-**Symptoms**: `ping` works between some interfaces but fails between network namespaces  
-**Solution**: Disable bridge netfilter to allow unrestricted bridge traffic
-```bash
-# Disable bridge netfilter (applies iptables rules to bridge traffic)
-sudo sysctl -w net.bridge.bridge-nf-call-iptables=0
-sudo sysctl -w net.bridge.bridge-nf-call-ip6tables=0
-
-# Make permanent by adding to /etc/sysctl.conf:
-echo "net.bridge.bridge-nf-call-iptables=0" | sudo tee -a /etc/sysctl.conf
-echo "net.bridge.bridge-nf-call-ip6tables=0" | sudo tee -a /etc/sysctl.conf
-```
-
-#### iptables FORWARD policy blocking inter-subnet communication
-**Problem**: Default FORWARD policy DROP prevents routing between L3BGP subnets  
-**Symptoms**: 
-- Nodes can reach bridge gateway (`192.168.X.254`)
-- Cross-subnet communication fails (`192.168.30.97` → `192.168.31.98`)
-- `traceroute` shows first hop working, then `* * *`
-**Solution**: Add iptables rule to allow forwarding on bridge interface
-```bash
-# Allow forwarding between interfaces on the same bridge
-sudo iptables -I FORWARD -i ha-cluster -o ha-cluster -j ACCEPT
-
-# Or temporarily change policy (less secure)
-sudo iptables --policy FORWARD ACCEPT
-
-# Check current FORWARD policy
-sudo iptables -L FORWARD -n -v | head -1
-```
-
-#### L3BGP configuration using default values instead of config file
-**Problem**: Configuration parsing not loading node-specific variables  
-**Symptoms**: 
-- Parsed config shows `IP=192.168.1.1` instead of configured `IP=192.168.30.97`
-- Manager connectivity fails to wrong IP addresses
-**Solution**: Ensure config loading uses global variable scope
-```bash
-# Check if node variables are being set correctly
-grep "node_1_ip" your-config.conf
-
-# Verify the declare statement uses -g flag in load_config_file()
-# In raft-cluster-netns.sh, ensure:
-declare -g "$key=$value"  # Instead of just: declare "$key=$value"
-```
-
-#### Missing test_connectivity function
-**Problem**: Script calls undefined function  
-**Symptoms**: `./script.sh test` fails with "command not found"  
-**Solution**: Function should route to appropriate network module
-```bash
-# Function should be implemented as:
-test_connectivity() {
-    if [[ "$NETWORK_TYPE" == "l3bgp" ]]; then
-        source "$SCRIPT_DIR/lib/network-l3bgp.sh"
-        parse_l3bgp_config  # Important: parse config first
-        test_l3bgp_connectivity
-    else
-        # Handle simple network testing
-    fi
-}
-```
-
-#### Hard-coded subnet logic in L3BGP module
-**Problem**: L3BGP setup uses default subnets (1, 2, 3) instead of configured subnets  
-**Symptoms**: Bridge shows `192.168.1.254`, `192.168.2.254` instead of `192.168.30.254`, `192.168.31.254`  
-**Solution**: Use actual configured subnets in routing and bridge setup
-```bash
-# Check bridge gateway addresses
-ip addr show ha-cluster | grep inet
-
-# Should show configured subnets like:
-# inet 192.168.30.254/24 scope global ha-cluster
-# inet 192.168.31.254/24 scope global ha-cluster
-# Not: inet 192.168.1.254/24, inet 192.168.2.254/24
-```
-
-#### Debugging network connectivity step by step
-```bash
-# 1. Test basic namespace connectivity
-sudo ip netns list | grep l3bgp
-
-# 2. Test bridge gateway reachability
-sudo ip netns exec l3bgp1ns ping -c 1 192.168.30.254
-
-# 3. Test host-to-manager connectivity
-ping -c 1 192.168.30.2
-
-# 4. Check ARP tables
-sudo ip netns exec l3bgp1ns ip neighbor show
-
-# 5. Test cross-subnet routing
-sudo ip netns exec l3bgp1ns ping -c 1 192.168.31.98
-
-# 6. Check bridge netfilter settings
-sudo sysctl net.bridge.bridge-nf-call-iptables
-
-# 7. Check iptables FORWARD policy
-sudo iptables -L FORWARD -n | head -1
-
-# 8. Verify routing table
-sudo ip netns exec l3bgp1ns ip route show
-
-# 9. Test full connectivity
-./raft-cluster-netns.sh test -c your-config.conf
 ```
 
 
