@@ -21,12 +21,10 @@ DRY_RUN="false"
 
 # Set up node configurations
 node_1_ip="192.168.1.1"
-node_1_hostname="test1.cluster.local"
 node_1_subnet="192.168.1.0/24"
 node_1_asn="64501"
 
 node_2_ip="192.168.2.1"
-node_2_hostname="test2.cluster.local"
 node_2_subnet="192.168.2.0/24"
 node_2_asn="64502"
 

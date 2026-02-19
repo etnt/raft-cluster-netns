@@ -162,12 +162,11 @@ parse_l3bgp_config() {
     # Parse node-specific settings
     for ((i=1; i<=NODES; i++)); do
         local ip_var="node_${i}_ip"
-        local hostname_var="node_${i}_hostname" 
         local subnet_var="node_${i}_subnet"
         local asn_var="node_${i}_asn"
         
         eval "NODE_${i}_IP=\${${ip_var}:-192.168.${i}.1}"
-        eval "NODE_${i}_HOSTNAME=\${${hostname_var}:-${PREFIX}${i}.ha-cluster}"
+        eval "NODE_${i}_HOSTNAME=${PREFIX}${i}.ha-cluster"
         eval "NODE_${i}_SUBNET=\${${subnet_var}:-192.168.${i}.0/24}"
         eval "NODE_${i}_ASN=\${${asn_var}:-$((64500 + i))}"
         
@@ -302,17 +301,16 @@ ff02::2     ip6-allrouters
 # $NETWORK_TYPE Cluster nodes
 EOF
 
-    # Add entries for all cluster nodes (custom IPs and hostnames)
+    # Add entries for all cluster nodes
     for ((j=1; j<=NODES; j++)); do
         local node_ip="$(get_node_ip "$j")"
-        local node_hostname="$(get_node_hostname "$j")"
-        local nso_hostname="${PREFIX}${j}.ha-cluster"
-        echo "$node_ip    $node_hostname $nso_hostname" >> "$hosts_file"
+        local node_hostname="${PREFIX}${j}.ha-cluster"
+        echo "$node_ip    $node_hostname" >> "$hosts_file"
     done
     
     # Add manager if enabled
     if [[ "$MANAGER_ENABLED" == "true" ]]; then
-        echo "$MANAGER_IP    manager.cluster.local" >> "$hosts_file"
+        echo "$MANAGER_IP    manager.ha-cluster" >> "$hosts_file"
     fi
 }
 
@@ -391,9 +389,8 @@ create_l3bgp_namespaces() {
         local netns="${PREFIX}${i}ns"
         local veth_a="${PREFIX}${i}a"
         local node_ip="$(get_node_ip "$i")"
-        local node_hostname="$(get_node_hostname "$i")"
         
-        log_info "Creating $NETWORK_TYPE namespace: $netns ($node_hostname)"
+        log_info "Creating $NETWORK_TYPE namespace: $netns (${PREFIX}${i}.ha-cluster)"
         
         # Create namespace
         execute_cmd "sudo ip netns add $netns"
@@ -810,7 +807,6 @@ validate_l3bgp_network() {
     
     for ((i=1; i<=NODES; i++)); do
         local node_ip="$(get_node_ip "$i")"
-        local node_hostname="$(get_node_hostname "$i")"
         local netns="${PREFIX}${i}ns"
         local veth_a="${PREFIX}${i}a"
         
@@ -825,7 +821,7 @@ validate_l3bgp_network() {
             return 1
         fi
         
-        log_debug "✅ Node $i ($node_hostname) validation passed"
+        log_debug "✅ Node $i (${PREFIX}${i}.ha-cluster) validation passed"
     done
     
     if [[ "$MANAGER_ENABLED" == "true" ]]; then
@@ -854,7 +850,7 @@ test_l3bgp_connectivity() {
     
     for ((i=1; i<=NODES; i++)); do
         local netns="${PREFIX}${i}ns"
-        local node_hostname="$(get_node_hostname "$i")"
+        local node_name="${PREFIX}${i}.ha-cluster"
         
         # Test ping to manager if enabled
         if [[ "$MANAGER_ENABLED" == "true" ]]; then
@@ -863,24 +859,28 @@ test_l3bgp_connectivity() {
             local node_subnet="$(get_node_subnet "$i")"
             local subnet_prefix=$(echo "$node_subnet" | cut -d'/' -f1 | cut -d'.' -f1-3)
             local manager_subnet_ip="${subnet_prefix}.2"
-            log_debug "Testing ping from $node_hostname to manager ($manager_subnet_ip)"
+            log_debug "Testing ping from $node_name to manager ($manager_subnet_ip)"
             if ! execute_cmd "sudo ip netns exec $netns ping -c 1 -W 2 $manager_subnet_ip"; then
-                log_error "Ping failed from $node_hostname to manager"
+                log_error "Ping failed from $node_name to manager"
                 return 1
             fi
         fi
         
-        # Test hostname resolution to other nodes
+        # Test hostname resolution (verify hosts file is working)
         for ((j=1; j<=NODES; j++)); do
             if [[ "$i" != "$j" ]]; then
-                local target_hostname="$(get_node_hostname "$j")"
-                log_debug "Testing hostname resolution from $node_hostname to $target_hostname"
-                if ! execute_cmd "sudo ip netns exec $netns ping -c 1 -W 2 $target_hostname"; then
-                    log_error "Hostname resolution failed from $node_hostname to $target_hostname"
+                local target_name="${PREFIX}${j}.ha-cluster"
+                log_debug "Testing hostname resolution from $node_name to $target_name"
+                if ! execute_cmd "sudo ip netns exec $netns getent hosts $target_name"; then
+                    log_error "Hostname resolution failed from $node_name to $target_name"
                     return 1
                 fi
             fi
         done
+
+        # Note: Cross-subnet ping is not tested here because BGP routes
+        # are not yet established. Full connectivity is available after
+        # BGP daemons are started.
     done
     
     log_info "$NETWORK_TYPE network connectivity test passed"
@@ -1006,10 +1006,9 @@ show_bgp_status() {
     
     for ((i=1; i<=NODES; i++)); do
         local netns="${PREFIX}${i}ns"
-        local node_hostname="$(eval echo \$NODE_${i}_HOSTNAME)"
         
         echo ""
-        echo "=== Node $i ($node_hostname) ==="
+        echo "=== Node $i (${PREFIX}${i}.ha-cluster) ==="
         
         if [[ "${DRY_RUN}" == "true" ]]; then
             log_debug "[DRY-RUN] Would show BGP status for $netns"
