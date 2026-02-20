@@ -7,10 +7,11 @@
 # define BGP neighbors including the manager and all other cluster nodes.
 #
 # OVERRIDE FUNCTIONS (modify L3BGP behavior):
-#   start_gobgp_daemons()       - Start GoBGP only on manager node (not cluster nodes)
-#   start_zebra_daemons()       - Start Zebra only on manager node (not cluster nodes)  
+#   create_gobgp_configs()      - Create GoBGP config for manager only (HCC manages node gobgpd)
+#   start_gobgp_daemons()       - Start GoBGP only on manager node (HCC starts gobgpd on NSO nodes)
+#   start_zebra_daemons()       - Start Zebra only on manager node (not cluster nodes)
 #   cleanup_l3bgp_processes()   - Cleanup only manager node BGP/Zebra processes
-#   create_manager_gobgp_config() - Create simplified manager GoBGP config (no transport)
+#   create_manager_gobgp_config() - Create manager GoBGP config (with zebra integration)
 #
 # TAILF_HCC SPECIFIC FUNCTIONS:
 #   setup_l3bgp_nso_packages()  - Setup NSO packages with tailf-hcc package links
@@ -34,50 +35,61 @@ source "$SCRIPT_DIR/lib/network-l3bgp.sh"
 
 log_info "Loaded tailf_hcc network module"
 
-# Override the start_gobgp_daemons function to only start on manager
+# Override create_gobgp_configs: only create the manager config.
+# Node gobgpd configs are generated internally by the tailf-hcc package.
+create_gobgp_configs() {
+    log_info "Creating GoBGP configuration files (tailf_hcc mode: manager only)..."
+
+    local gobgp_dir="${WORK_DIR}/gobgp"
+    execute_cmd "mkdir -p $gobgp_dir"
+
+    # Node gobgpd instances are managed entirely by the HCC package — no configs
+    # needed here.
+
+    # Create manager config (with zebra integration)
+    if [[ "$MANAGER_ENABLED" == "true" ]]; then
+        create_manager_gobgp_config "$MANAGER_IP" "${MANAGER_ASN:-64500}" "${gobgp_dir}/manager.yaml"
+    fi
+}
+
+# Override start_gobgp_daemons: start gobgpd only on the manager namespace.
+# gobgpd on NSO node namespaces is started and managed by the tailf-hcc package
+# when NSO loads — we must not pre-start it ourselves.
 start_gobgp_daemons() {
     log_info "Starting GoBGP daemons (tailf_hcc mode: manager only)"
-    
-    # Only start GoBGP on the manager node
-    local manager_node=$(get_manager_node)
-    if [[ -z "$manager_node" ]]; then
-        log_error "No manager node found"
-        return 1
+
+    if [[ "$MANAGER_ENABLED" != "true" ]]; then
+        log_info "Manager not enabled, skipping gobgpd startup"
+        return 0
     fi
-    
-    log_info "Starting GoBGP daemon on manager node: $manager_node"
-    
-    local mgr_ns="${PREFIX}manager"
+
     local gobgp_dir="${WORK_DIR}/gobgp"
+    local manager_node=$(get_manager_node)
+    local mgr_ns="${PREFIX}manager"
     local manager_config="${gobgp_dir}/manager.yaml"
     local manager_log="${gobgp_dir}/manager.log"
-    
+
     if [[ ! -f "$manager_config" ]]; then
         log_error "GoBGP config file not found: $manager_config"
         return 1
     fi
-    
-    log_debug "Starting GoBGP manager in namespace $mgr_ns"
-    
+
+    log_info "Starting GoBGP daemon on manager node: $manager_node"
+
     if [[ "${DRY_RUN}" != "true" ]]; then
-        # Start GoBGP manager daemon
-        log_debug "Starting manager GoBGP daemon: sudo ip netns exec $mgr_ns gobgpd -f $manager_config -l debug"
         sudo ip netns exec "$mgr_ns" gobgpd -f "$manager_config" -l debug > "$manager_log" 2>&1 &
-        
-        # Wait a moment for startup
+
         sleep 3
-        
-        # Verify GoBGP is running
-        if sudo ip netns exec "$mgr_ns" pgrep -f "gobgpd.*manager.yaml" > /dev/null; then
-            log_info "GoBGP daemon started successfully on $manager_node"
-        else
-            log_error "Failed to start GoBGP daemon on $manager_node"
+
+        if ! sudo ip netns exec "$mgr_ns" pgrep -f "gobgpd.*manager.yaml" > /dev/null; then
+            log_error "Failed to start GoBGP daemon on manager"
             return 1
         fi
+        log_info "GoBGP daemon started on manager"
     fi
-    
-    # The gobgpd output is messing with the terminal, so reset it!
-    stty sane  # restore sane tty settings
+
+    # The gobgpd output can mess with the terminal, so reset it
+    stty sane
     echo
 }
 
@@ -184,8 +196,31 @@ setup_l3bgp_nso_packages() {
     # Clone tailf-hcc package if not exists
     local hcc_dir="${WORK_DIR}/tailf-hcc"
     if [[ ! -d "$hcc_dir" ]]; then
-        log_info "Cloning tailf-hcc package..."
-        execute_cmd "git clone ssh://git@stash.tail-f.com/pkg/tailf-hcc.git $hcc_dir"
+        local repo_url="ssh://git@stash.tail-f.com/pkg/tailf-hcc.git"
+        while true; do
+            echo "Repository address: $repo_url"
+            read -rp "Clone tailf-hcc package? [Y/n/c (change URL)]: " choice
+            choice="${choice:-Y}"
+            case "$choice" in
+                [Yy]|[Yy][Ee][Ss])
+                    log_info "Cloning tailf-hcc package..."
+                    execute_cmd "git clone $repo_url $hcc_dir"
+                    log_info "Compiling tailf-hcc package..."
+                    execute_cmd "make -C $hcc_dir/src"
+                    break
+                    ;;
+                [Nn]|[Nn][Oo])
+                    log_info "Skipping tailf-hcc clone."
+                    return 0
+                    ;;
+                [Cc]|[Cc][Hh][Aa][Nn][Gg][Ee])
+                    read -rp "Enter new repository URL: " repo_url
+                    ;;
+                *)
+                    echo "Invalid option. Please enter Y, n, or c."
+                    ;;
+            esac
+        done
     fi
     
     # Create package links and HCC config files in each NSO node

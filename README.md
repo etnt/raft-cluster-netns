@@ -31,7 +31,7 @@ or shared configuration are created.
 
 ## Quick Start
 
-### Basic Setup
+### Basic Setup and Start of a cluster
 
 ```bash
 # Create (default) config file: .raft-cluster.conf
@@ -40,35 +40,43 @@ or shared configuration are created.
 # Setup a RAFT cluster according to (default) config file
 ./raft-cluster-netns.sh setup
 
-# Check cluster status
-./raft-cluster-netns.sh status
-
-# Test network connectivity
-./raft-cluster-netns.sh test
-
 # Start NSO nodes
 ./raft-cluster-netns.sh start
 
-# Enter a bash shell on node 1
-./raft-cluster-netns.sh shell 1
+# Check cluster status
+./raft-cluster-netns.sh status
 
-# Run command  to enter NSO CLI on node 1
+```
+
+### Create a HA Raft cluster
+
+```bash
+
+# Run command to enter NSO CLI on node 1
 ./raft-cluster-netns.sh exec 1 "ncs_cli -u admin"
 
-# Create HA-Raft cluster from node 1
-./raft-cluster-netns.sh exec 1 'ncs_cmd -c "maction /ha-raft/create-cluster member [ ncsd2@tailf_hcc2.ha-cluster ncsd3@tailf_hcc3.ha-cluster ]"'
+# From the NSO CLI, create the HA Raft cluster
+admin@ncs> request ha-raft create-cluster member [ ncsd2@tailf_hcc2.ha-cluster ncsd3@tailf_hcc3.ha-cluster ]
+[ok][2026-02-20 12:58:04]
 
-# Get HA-Raft leader from node 1
-./raft-cluster-netns.sh exec 1 'ncs_cmd -I -c "mget /ha-raft/status/leader"'
+```
 
+### More commands 
+
+```bash
+
+# Enter a bash shell inside the network namespace of node 1
+./raft-cluster-netns.sh shell 1 
 
 # Simulate network failures
 ./raft-cluster-netns.sh isolate 1          # Isolate node 1
+./raft-cluster-netns.sh heal 1             # Restore connectivity
+
 ./raft-cluster-netns.sh partition 1,2      # Create 2-node partition 
 ./raft-cluster-netns.sh heal               # Restore connectivity
 
 # Clean up everything
-./raft-cluster-netns.sh cleanup --force
+./raft-cluster-netns.sh cleanup 
 
 # Get help
 ./raft-cluster-netns.sh help
