@@ -66,6 +66,23 @@ check_l3bgp_prerequisites() {
     else
         local gobgp_version=$(gobgpd --version 2>/dev/null | head -1)
         log_info "✅ Found gobgpd: $gobgp_version"
+
+        # gobgpd must bind TCP port 179 (privileged). When NSO runs as a
+        # non-root user, HCC launches gobgpd as that same user, so the binary
+        # needs CAP_NET_BIND_SERVICE or the setuid-root bit.
+        # See: https://nso-docs.cisco.com/guides/administration/management/high-availability#ug.ha.hcc
+        local gobgpd_path; gobgpd_path=$(command -v gobgpd)
+        if getcap "$gobgpd_path" 2>/dev/null | grep -q "cap_net_bind_service"; then
+            log_info "✅ gobgpd has cap_net_bind_service (can bind port 179 as non-root)"
+        elif [[ -u "$gobgpd_path" ]]; then
+            log_info "✅ gobgpd has setuid-root bit (can bind port 179 as non-root)"
+        else
+            log_warn "⚠️  gobgpd cannot bind privileged port 179 as a non-root user."
+            log_warn "   If NSO runs as non-root, the HCC package will fail to start gobgpd."
+            log_warn "   Fix with one of:"
+            log_warn "     sudo setcap 'cap_net_bind_service=+ep' $gobgpd_path"
+            log_warn "     sudo chown root $gobgpd_path && sudo chmod u+s $gobgpd_path"
+        fi
     fi
     
     # Check for zebra (FRR)
@@ -312,6 +329,12 @@ EOF
     if [[ "$MANAGER_ENABLED" == "true" ]]; then
         echo "$MANAGER_IP    manager.ha-cluster" >> "$hosts_file"
     fi
+
+    # Add the host machine's own hostname so that sudo inside the namespace
+    # can resolve it (sudo requires the hostname to be resolvable)
+    local host_name
+    host_name=$(hostname)
+    echo "127.0.0.1    $host_name" >> "$hosts_file"
 }
 
 # Create all $NETWORK_TYPE hosts files
@@ -368,6 +391,11 @@ create_l3bgp_veth_pairs() {
         local veth_b="${PREFIX}${i}b"
         
         log_debug "Creating $NETWORK_TYPE veth pair: $veth_a <-> $veth_b"
+        if ip link show "$veth_a" >/dev/null 2>&1; then
+            log_error "Interface '$veth_a' already exists — a previous setup may not have been cleaned up."
+            log_error "Run '$(basename "$0") cleanup' before running setup again."
+            return 1
+        fi
         execute_cmd "sudo ip link add dev $veth_a type veth peer name $veth_b"
     done
     
@@ -377,6 +405,11 @@ create_l3bgp_veth_pairs() {
         local mgr_veth_b="${PREFIX}mgrb"
         
         log_debug "Creating manager veth pair: $mgr_veth_a <-> $mgr_veth_b"
+        if ip link show "$mgr_veth_a" >/dev/null 2>&1; then
+            log_error "Interface '$mgr_veth_a' already exists — a previous setup may not have been cleaned up."
+            log_error "Run '$(basename "$0") cleanup' before running setup again."
+            return 1
+        fi
         execute_cmd "sudo ip link add dev $mgr_veth_a type veth peer name $mgr_veth_b"
     fi
 }
@@ -471,6 +504,10 @@ setup_l3bgp_bridges() {
     
     # Enable IP forwarding for $NETWORK_TYPE routing
     execute_cmd "sudo sysctl -w net.ipv4.ip_forward=1"
+    
+    # Allow forwarded traffic through the bridge (Docker sets FORWARD policy to DROP)
+    execute_cmd "sudo iptables -I FORWARD -i $BRIDGE_NAME -j ACCEPT"
+    execute_cmd "sudo iptables -I FORWARD -o $BRIDGE_NAME -j ACCEPT"
 }
 
 # Setup manager node
@@ -903,6 +940,10 @@ cleanup_l3bgp_network() {
             execute_cmd "sudo ip netns del $mgr_ns"
         fi
     fi
+    
+    # Remove iptables rules added for this bridge
+    sudo iptables -D FORWARD -i $BRIDGE_NAME -j ACCEPT 2>/dev/null || true
+    sudo iptables -D FORWARD -o $BRIDGE_NAME -j ACCEPT 2>/dev/null || true
     
     # Use the same cleanup functions as simple network
     cleanup_bridge
