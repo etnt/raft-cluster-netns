@@ -137,12 +137,34 @@ check_basic_prerequisites() {
     
     if [[ ${#missing_commands[@]} -gt 0 ]]; then
         log_error "Missing required commands: ${missing_commands[*]}"
+        log_error ""
+        log_error "These are core system utilities that should be installed by default."
+        log_error "Installation hints:"
+        for cmd in "${missing_commands[@]}"; do
+            case "$cmd" in
+                ip)
+                    log_error "  ip: sudo apt-get install iproute2  (or: sudo yum install iproute)"
+                    ;;
+                sudo)
+                    log_error "  sudo: Please install sudo and add your user to the sudo group"
+                    ;;
+                *)
+                    log_error "  $cmd: sudo apt-get install coreutils  (or: sudo yum install coreutils)"
+                    ;;
+            esac
+        done
         exit 1
     fi
     
     # Check if we can use sudo
     if ! sudo -n true 2>/dev/null; then
         log_error "This script requires sudo access. Please run with sudo or configure passwordless sudo."
+        log_error ""
+        log_error "To configure passwordless sudo for this script, you can:"
+        log_error "  1. Run: sudo visudo"
+        log_error "  2. Add: $USER ALL=(ALL) NOPASSWD: ALL"
+        log_error "  Or for more restricted access:"
+        log_error "     $USER ALL=(ALL) NOPASSWD: /usr/sbin/ip, /usr/bin/mkdir, /usr/bin/rm"
         exit 1
     fi
     

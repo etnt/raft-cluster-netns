@@ -54,15 +54,73 @@
 #   - Automatic kernel route installation via FRR Zebra
 #   - Cross-subnet communication through BGP routing
 
+# Detect package manager and distribution
+detect_package_manager() {
+    if command -v apt-get >/dev/null 2>&1; then
+        echo "apt"
+    elif command -v dnf >/dev/null 2>&1; then
+        echo "dnf"
+    elif command -v yum >/dev/null 2>&1; then
+        echo "yum"
+    elif command -v pacman >/dev/null 2>&1; then
+        echo "pacman"
+    elif command -v zypper >/dev/null 2>&1; then
+        echo "zypper"
+    else
+        echo "unknown"
+    fi
+}
+
+# Get installation command for a package
+get_install_hint() {
+    local package="$1"
+    local pkg_mgr
+    pkg_mgr=$(detect_package_manager)
+    
+    case "$package" in
+        gobgp)
+            case "$pkg_mgr" in
+                apt)     echo "sudo apt-get install gobgpd" ;;
+                dnf|yum) echo "sudo $pkg_mgr install gobgp" ;;
+                pacman)  echo "yay -S gobgp-bin  # or build from source" ;;
+                *)       echo "# Install from https://github.com/osrg/gobgp/releases" ;;
+            esac
+            ;;
+        frr)
+            case "$pkg_mgr" in
+                apt)     echo "sudo apt-get install frr frr-pythontools" ;;
+                dnf|yum) echo "sudo $pkg_mgr install frr" ;;
+                pacman)  echo "sudo pacman -S frr" ;;
+                zypper)  echo "sudo zypper install frr" ;;
+                *)       echo "# Install from https://frrouting.org/  (see docs for your distro)" ;;
+            esac
+            ;;
+        git)
+            case "$pkg_mgr" in
+                apt)     echo "sudo apt-get install git" ;;
+                dnf|yum) echo "sudo $pkg_mgr install git" ;;
+                pacman)  echo "sudo pacman -S git" ;;
+                zypper)  echo "sudo zypper install git" ;;
+                *)       echo "# Install git from https://git-scm.com/" ;;
+            esac
+            ;;
+        *)
+            echo "# Please install '$package' using your system package manager"
+            ;;
+    esac
+}
+
 # Check L3BGP prerequisites
 check_l3bgp_prerequisites() {
     log_info "Checking $NETWORK_TYPE prerequisites..."
     local missing_deps=()
+    local install_hints=()
     
     # Check for gobgpd
     if ! command_exists gobgpd; then
         log_error "❌ gobgpd not found in PATH"
         missing_deps+=("gobgp")
+        install_hints+=("$(get_install_hint gobgp)")
     else
         local gobgp_version=$(gobgpd --version 2>/dev/null | head -1)
         log_info "✅ Found gobgpd: $gobgp_version"
@@ -88,7 +146,10 @@ check_l3bgp_prerequisites() {
     # Check for zebra (FRR)
     if ! [[ -x "/usr/lib/frr/zebra" ]]; then
         log_error "❌ zebra (FRR) not found at /usr/lib/frr/zebra"
-        missing_deps+=("frr")
+        if [[ ! " ${missing_deps[*]} " =~ " frr " ]]; then
+            missing_deps+=("frr")
+            install_hints+=("$(get_install_hint frr)")
+        fi
     else
         local zebra_version=$(/usr/lib/frr/zebra --version 2>/dev/null | head -1)
         log_info "✅ Found zebra: $zebra_version"
@@ -97,7 +158,10 @@ check_l3bgp_prerequisites() {
     # Check for vtysh (FRR shell)
     if ! command_exists vtysh; then
         log_error "❌ vtysh (FRR shell) not found in PATH"
-        missing_deps+=("frr")
+        if [[ ! " ${missing_deps[*]} " =~ " frr " ]]; then
+            missing_deps+=("frr")
+            install_hints+=("$(get_install_hint frr)")
+        fi
     else
         log_info "✅ Found vtysh: $(vtysh --version 2>/dev/null | head -1)"
     fi
@@ -106,6 +170,7 @@ check_l3bgp_prerequisites() {
     if ! command_exists git; then
         log_error "❌ git not found in PATH"
         missing_deps+=("git")
+        install_hints+=("$(get_install_hint git)")
     else
         log_info "✅ Found git: $(git --version)"
     fi
@@ -113,23 +178,37 @@ check_l3bgp_prerequisites() {
     # Check if frr user exists
     if ! id frr >/dev/null 2>&1; then
         log_error "❌ frr user does not exist (required for FRR/Zebra)"
-        missing_deps+=("frr")
+        log_error "   The frr user is normally created when installing the frr package."
+        if [[ ! " ${missing_deps[*]} " =~ " frr " ]]; then
+            missing_deps+=("frr")
+            install_hints+=("$(get_install_hint frr)")
+        fi
     else
         log_info "✅ Found frr user"
     fi
     
     # Abort if dependencies missing
     if [[ ${#missing_deps[@]} -gt 0 ]]; then
-        log_error "Missing required dependencies for $NETWORK_TYPE setup:"
-        for dep in "${missing_deps[@]}"; do
-            log_error "  - $dep"
-        done
         log_error ""
-        log_error "Installation commands:"
-        log_error "  Ubuntu/Debian: sudo apt-get install gobgp frr"
-        log_error "  CentOS/RHEL:   sudo yum install gobgp frr"
-        log_error "  GoBGP source:  https://github.com/osrg/gobgp"
-        log_error "  FRR source:    https://frrouting.org/"
+        log_error "╔════════════════════════════════════════════════════════════════╗"
+        log_error "║  Missing required dependencies for $NETWORK_TYPE setup"
+        log_error "╠════════════════════════════════════════════════════════════════╣"
+        log_error "║  To install the missing packages, run:"
+        log_error "║"
+        for hint in "${install_hints[@]}"; do
+            log_error "║    $hint"
+        done
+        log_error "║"
+        log_error "║  After installing FRR, you may need to:"
+        log_error "║    sudo systemctl enable frr"
+        log_error "║"
+        log_error "║  After installing gobgpd, grant it permission to bind port 179:"
+        log_error "║    sudo setcap 'cap_net_bind_service=+ep' \$(which gobgpd)"
+        log_error "║"
+        log_error "║  More info:"
+        log_error "║    GoBGP: https://github.com/osrg/gobgp"
+        log_error "║    FRR:   https://frrouting.org/"
+        log_error "╚════════════════════════════════════════════════════════════════╝"
         exit 1
     fi
     
