@@ -82,6 +82,37 @@ admin@ncs> request ha-raft create-cluster member [ ncsd2@tailf_hcc2.ha-cluster n
 ./raft-cluster-netns.sh help
 ```
 
+### Setup tailf-hcc with BGP failover handling
+
+```bash
+# After the ha-raft cluster is up and running, enter the CLI
+./raft-cluster-netns.sh exec 1 "ncs_cli -u admin"
+
+# Enter configure mode
+admin@ncs> configure
+
+# Load the tailf-hcc config
+admin@ncs% load merge hcc.xml
+
+# Setup a VIP address and enable tailf-hcc
+admin@ncs% set hcc enabled vip-address 192.168.22.22
+
+# Commit the tailf-hcc configuration
+admin@ncs% commit
+
+# From another (Bash) shell, try pinging the VIP
+❯ ping 192.168.22.22
+
+# Check that the VIP is setup on node 1
+❯ ./raft-cluster-netns.sh exec 1 'ip a ls'
+
+# From the CLI shell handover the VIP to another node
+admin@ncs> request ha-raft handover to-member ncsd2@tailf_hcc2.ha-cluster
+
+# Check that the VIP now is setup on node 2
+❯ ./raft-cluster-netns.sh exec 2 'ip a ls'
+```
+
 ### Tailf-HCC Details
 
 **Tailf-HCC features:**
