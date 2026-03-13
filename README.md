@@ -14,6 +14,7 @@ cluster testing environments using Linux network namespaces. It provides:
 - **NSO Cluster Configuration**: Complete RAFT setup with SSL/TLS enabled by default  
 - **Tailf-hcc**: Prepared for running BGP advertisment using the tailf-hcc package
 - **Network Partition Simulation**: Test split-brain scenarios with node isolation and healing
+- **Network Impairment Simulation**: Add latency, jitter, packet loss, and corruption to test degraded network conditions
 - **Management & Debugging**: Interactive shells, command execution, and comprehensive status reporting
 - **Developer-Friendly**: Dry-run mode, verbose logging, and configuration persistence
 
@@ -227,7 +228,15 @@ export ENV_SH_PATH="/path/to/your/env.sh"
 | `isolate` | Isolate single node | `./raft-cluster-netns.sh isolate 1` |
 | `partition` | Create network partition | `./raft-cluster-netns.sh partition 1,2` |
 | `heal` | Heal network partitions | `./raft-cluster-netns.sh heal` |
+### Network Impairment Commands
 
+| Command | Description | Example |
+|---------|-------------|----------|
+| `delay` | Add latency to node(s) | `./raft-cluster-netns.sh delay 1 100ms` |
+| `loss` | Add packet loss to node(s) | `./raft-cluster-netns.sh loss 2 5%` |
+| `impair` | Combined impairment | `./raft-cluster-netns.sh impair 1 --delay 100ms --loss 2%` |
+| `impair-status` | Show current impairments | `./raft-cluster-netns.sh impair-status` |
+| `impair-scenario` | Apply predefined scenario | `./raft-cluster-netns.sh impair-scenario wan` |
 ### Debugging Commands
 
 | Command | Description | Example |
@@ -626,6 +635,220 @@ sudo ip link del ha-clusterpart 2>/dev/null || true
 # Watch RAFT role changes in real-time
 watch -n 1 './raft-cluster-netns.sh exec 1 "ncs_cmd -c \"mget /ha-raft/status/role\""'
 ```
+
+## Network Impairment Testing
+
+### Overview
+
+Beyond hard network partitions, real-world distributed systems often face
+**degraded network conditions** — high latency, packet loss, jitter, and
+corruption. These "grey failures" can be harder to handle than clean partitions
+because nodes remain reachable but communication is unreliable.
+
+The script uses Linux **`tc` (traffic control)** with the **`netem`** (network
+emulator) queueing discipline to simulate these conditions. Impairment rules are
+applied on the veth interface inside each network namespace, so they work
+identically across all network topologies (simple, l3bgp, tailf_hcc).
+
+### Quick Examples
+
+```bash
+# Add 100ms latency to node 1
+./raft-cluster-netns.sh delay 1 100ms
+
+# Add 100ms ± 20ms jitter to node 2
+./raft-cluster-netns.sh delay 2 100ms 20ms
+
+# Add 50ms latency to ALL nodes
+./raft-cluster-netns.sh delay all 50ms
+
+# Add 5% packet loss on node 3
+./raft-cluster-netns.sh loss 3 5%
+
+# Combined: 100ms delay + 2% loss on node 1
+./raft-cluster-netns.sh impair 1 --delay 100ms --loss 2%
+
+# Check what impairments are active
+./raft-cluster-netns.sh impair-status
+
+# Remove impairment from node 1
+./raft-cluster-netns.sh delay 1 reset
+
+# Remove all impairments from all nodes
+./raft-cluster-netns.sh impair all reset
+```
+
+### Latency (`delay`)
+
+Adds a fixed or variable delay to all outgoing packets from a node.
+
+```bash
+# Fixed 100ms delay
+./raft-cluster-netns.sh delay 1 100ms
+
+# Variable delay: 100ms ± 20ms (normal distribution)
+# Each packet gets a random delay between ~80ms and ~120ms
+./raft-cluster-netns.sh delay 1 100ms 20ms
+
+# Apply to all nodes (simulate WAN-like cluster)
+./raft-cluster-netns.sh delay all 50ms
+
+# Remove delay
+./raft-cluster-netns.sh delay 1 reset
+```
+
+### Packet Loss (`loss`)
+
+Drops a percentage of outgoing packets.
+
+```bash
+# 5% uniform random loss
+./raft-cluster-netns.sh loss 1 5%
+
+# 10% loss with 25% correlation (bursty loss)
+# When a packet is dropped, the next packet has a 25% higher chance of also
+# being dropped — this produces realistic burst loss patterns
+./raft-cluster-netns.sh loss 1 10% 25%
+
+# Remove loss
+./raft-cluster-netns.sh loss 1 reset
+```
+
+### Combined Impairment (`impair`)
+
+Apply multiple impairment types at once. Supports `--delay`, `--jitter`,
+`--loss`, `--corrupt`, `--duplicate`, and `--reorder`.
+
+```bash
+# Simulate a degraded WAN link
+./raft-cluster-netns.sh impair 1 --delay 100ms --jitter 20ms --loss 2%
+
+# Simulate a very bad link with corruption
+./raft-cluster-netns.sh impair 1 --delay 200ms --loss 5% --corrupt 0.1%
+
+# Asymmetric impairment (different per node)
+./raft-cluster-netns.sh impair 1 --delay 200ms --loss 5%
+./raft-cluster-netns.sh impair 2 --delay 50ms
+./raft-cluster-netns.sh impair 3 --delay 50ms
+
+# Clear impairments
+./raft-cluster-netns.sh impair 1 reset      # Single node
+./raft-cluster-netns.sh impair all reset     # All nodes
+```
+
+### Predefined Scenarios (`impair-scenario`)
+
+Apply named presets for common network conditions:
+
+| Scenario    | Delay   | Jitter | Loss  | Description              |
+|-------------|---------|--------|-------|--------------------------|
+| `lan`       | 1ms     | 0.5ms  | —     | Baseline local network   |
+| `wan`       | 50ms    | 10ms   | 0.1%  | Cross-datacenter         |
+| `satellite` | 300ms   | 50ms   | 1%    | High-latency link        |
+| `flaky`     | 20ms    | 50ms   | 5%    | Unreliable network       |
+| `congested` | 100ms   | 100ms  | 2%    | Overloaded network path  |
+| `lossy`     | 5ms     | 2ms    | 10%   | High packet loss         |
+
+```bash
+# Apply WAN scenario to all nodes
+./raft-cluster-netns.sh impair-scenario wan
+
+# Apply satellite scenario to just node 1
+./raft-cluster-netns.sh impair-scenario satellite 1
+
+# Clear afterwards
+./raft-cluster-netns.sh impair all reset
+```
+
+### Checking Impairment Status
+
+```bash
+./raft-cluster-netns.sh impair-status
+```
+
+Example output:
+```
+  Network Impairment Status:
+    Node 1 (tailf_hcc1a): delay 100.0ms 20.0ms loss 2%
+    Node 2 (tailf_hcc2a): delay 50.0ms
+    Node 3 (tailf_hcc3a): no impairment
+```
+
+Impairment info is also included in the general `status` command output.
+
+### Verifying Impairment with Ping
+
+```bash
+# Apply 200ms delay to node 1
+./raft-cluster-netns.sh delay 1 200ms
+
+# Ping from node 2 to node 1 — RTT should be ~200ms
+./raft-cluster-netns.sh exec 2 "ping -c 5 tailf_hcc1.ha-cluster"
+
+# Ping from node 1 to node 2 — also ~200ms (delay on egress)
+./raft-cluster-netns.sh exec 1 "ping -c 5 tailf_hcc2.ha-cluster"
+
+# Reset and verify RTT returns to < 1ms
+./raft-cluster-netns.sh delay 1 reset
+./raft-cluster-netns.sh exec 2 "ping -c 3 tailf_hcc1.ha-cluster"
+```
+
+### Testing RAFT Behavior Under Degraded Conditions
+
+#### **Election Timeout Stress Test**
+Test how latency affects leader election timing:
+
+```bash
+# Start the cluster
+./raft-cluster-netns.sh start
+
+# Apply increasing latency and observe election behavior
+./raft-cluster-netns.sh delay all 50ms     # Mild — should work normally
+./raft-cluster-netns.sh delay all 200ms    # Moderate — elections may slow
+./raft-cluster-netns.sh delay all 500ms    # Severe — may trigger re-elections
+
+# Clean up
+./raft-cluster-netns.sh impair all reset
+```
+
+#### **Asymmetric Degradation**
+Simulate a node with a bad network link:
+
+```bash
+# Node 1 has high latency and loss, others are fine
+./raft-cluster-netns.sh impair 1 --delay 300ms --loss 10%
+
+# Check if cluster adapts (e.g., leader moves to a better-connected node)
+./raft-cluster-netns.sh status
+```
+
+#### **Combined Partition + Impairment**
+Partitions and impairments are independent. You can use both simultaneously:
+
+```bash
+# Add latency to surviving nodes, then partition
+./raft-cluster-netns.sh delay 2 100ms
+./raft-cluster-netns.sh delay 3 100ms
+./raft-cluster-netns.sh isolate 1
+
+# Heal the partition (impairments remain)
+./raft-cluster-netns.sh heal 1
+
+# Clear impairments separately
+./raft-cluster-netns.sh impair all reset
+```
+
+### How It Works
+
+Impairment is implemented using `tc qdisc netem` on the veth-a interface inside
+each network namespace. This means:
+
+- **Per-node granularity**: Each node can have different impairment settings
+- **Topology-independent**: Works the same across simple, l3bgp, and tailf_hcc
+- **Composable with partitions**: Impairment and partitioning are orthogonal
+- **Auto-cleanup**: Deleting a namespace (via `cleanup`) removes all `tc` rules
+- **No extra dependencies**: `tc` is part of `iproute2`, already a prerequisite
+
 
 ## Configuration
 
