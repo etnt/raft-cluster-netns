@@ -117,6 +117,14 @@ ENV_SH_PATH=""
 MANAGER_ENABLED="false"
 MANAGER_IP="172.17.0.2"
 
+# Impairment command variables
+IMPAIR_DELAY=""
+IMPAIR_JITTER=""
+IMPAIR_LOSS=""
+IMPAIR_CORRUPT=""
+IMPAIR_DUPLICATE=""
+IMPAIR_REORDER=""
+
 # Configure command options
 AUTO_GENERATE=true
 CONFIG_OUTPUT=""
@@ -1429,6 +1437,11 @@ COMMANDS:
     isolate <node_id>       Isolate single node (simulate cable disconnect)
     partition <nodes>       Create network partition between groups (e.g., "1,2")
     heal [node_id]          Heal network partition (all nodes or specific node)
+    delay <node|all> <time> [jitter]    Add network latency to node(s)
+    loss <node|all> <pct> [correlation] Add packet loss to node(s)
+    impair <node|all> [opts]            Combined impairment (delay+loss+more)
+    impair-status           Show current network impairments
+    impair-scenario <name> [node|all]   Apply predefined impairment scenario
     configure               Create/generate configuration files
     help                    Show this help message
 
@@ -1489,6 +1502,20 @@ EXAMPLES:
     $SCRIPT_NAME heal                   # Heal all partitions
     $SCRIPT_NAME heal 1                 # Heal only node 1
 
+    # Network impairment (latency/loss)
+    $SCRIPT_NAME delay 1 100ms          # Add 100ms latency to node 1
+    $SCRIPT_NAME delay 2 100ms 20ms     # Add 100ms ± 20ms jitter to node 2
+    $SCRIPT_NAME delay all 50ms         # Add 50ms latency to all nodes
+    $SCRIPT_NAME delay 1 reset          # Remove latency from node 1
+    $SCRIPT_NAME loss 3 5%              # 5% packet loss on node 3
+    $SCRIPT_NAME loss 2 10% 25%         # 10% loss with 25% correlation
+    $SCRIPT_NAME loss 3 reset           # Remove loss from node 3
+    $SCRIPT_NAME impair 1 --delay 100ms --loss 2%   # Combined impairment
+    $SCRIPT_NAME impair all reset       # Clear all impairments
+    $SCRIPT_NAME impair-status          # Show impairment status
+    $SCRIPT_NAME impair-scenario wan    # Apply WAN scenario to all nodes
+    $SCRIPT_NAME impair-scenario satellite 1  # Satellite scenario on node 1
+
     # Complete cleanup
     $SCRIPT_NAME cleanup --force
 
@@ -1497,6 +1524,22 @@ EXAMPLES:
     $SCRIPT_NAME configure --nodes 5 --output my.conf      # Auto-generate with 5 nodes
     $SCRIPT_NAME configure --type l3bgp                    # Auto-generate L3 BGP config
     $SCRIPT_NAME configure --no-auto                       # Interactive wizard
+
+NETWORK IMPAIRMENT OPTIONS (for 'impair' command):
+    --delay <time>          Latency to add (e.g., 100ms, 1s)
+    --jitter <time>         Delay variation (e.g., 20ms)
+    --loss <percent>        Packet loss rate (e.g., 5%)
+    --corrupt <percent>     Packet corruption rate (e.g., 0.1%)
+    --duplicate <percent>   Packet duplication rate (e.g., 1%)
+    --reorder <percent>     Packet reorder rate (e.g., 5%)
+
+IMPAIRMENT SCENARIOS (for 'impair-scenario' command):
+    lan                     1ms delay, 0.5ms jitter (baseline)
+    wan                     50ms delay, 10ms jitter, 0.1% loss
+    satellite               300ms delay, 50ms jitter, 1% loss
+    flaky                   20ms delay, 50ms jitter, 5% loss
+    congested               100ms delay, 100ms jitter, 2% loss
+    lossy                   5ms delay, 2ms jitter, 10% loss
 
 CONFIGURE OPTIONS:
     --no-auto               Disable auto-generation, use interactive wizard instead
@@ -1680,6 +1723,90 @@ parse_args() {
                         log_error "Invalid partition specification: $1"
                         exit 1
                     fi
+                elif [[ "$command" == "delay" ]]; then
+                    # delay <node|all> <time> [jitter] | delay <node> reset
+                    if [[ -z "$SPECIFIC_NODE" ]]; then
+                        SPECIFIC_NODE="$1"
+                        shift
+                    fi
+                    if [[ $# -gt 0 ]]; then
+                        IMPAIR_DELAY="$1"
+                        shift
+                    fi
+                    if [[ $# -gt 0 ]] && [[ ! "$1" =~ ^- ]]; then
+                        IMPAIR_JITTER="$1"
+                        shift
+                    fi
+                elif [[ "$command" == "loss" ]]; then
+                    # loss <node|all> <percent> [correlation] | loss <node> reset
+                    if [[ -z "$SPECIFIC_NODE" ]]; then
+                        SPECIFIC_NODE="$1"
+                        shift
+                    fi
+                    if [[ $# -gt 0 ]]; then
+                        IMPAIR_LOSS="$1"
+                        shift
+                    fi
+                    if [[ $# -gt 0 ]] && [[ ! "$1" =~ ^- ]]; then
+                        IMPAIR_CORRUPT="$1"  # reuse as correlation
+                        shift
+                    fi
+                elif [[ "$command" == "impair" ]]; then
+                    # impair <node|all> [--delay T] [--jitter T] ... | impair <node> reset
+                    if [[ -z "$SPECIFIC_NODE" ]]; then
+                        SPECIFIC_NODE="$1"
+                        shift
+                    fi
+                    # Parse impair sub-options
+                    while [[ $# -gt 0 ]]; do
+                        case "$1" in
+                            --delay)
+                                IMPAIR_DELAY="$2"
+                                shift 2
+                                ;;
+                            --jitter)
+                                IMPAIR_JITTER="$2"
+                                shift 2
+                                ;;
+                            --loss)
+                                IMPAIR_LOSS="$2"
+                                shift 2
+                                ;;
+                            --corrupt)
+                                IMPAIR_CORRUPT="$2"
+                                shift 2
+                                ;;
+                            --duplicate)
+                                IMPAIR_DUPLICATE="$2"
+                                shift 2
+                                ;;
+                            --reorder)
+                                IMPAIR_REORDER="$2"
+                                shift 2
+                                ;;
+                            reset)
+                                IMPAIR_DELAY="reset"
+                                shift
+                                ;;
+                            -c|--config|-v|--verbose|-h|--help|--dry-run)
+                                break
+                                ;;
+                            *)
+                                log_error "Unknown impair option: $1"
+                                exit 1
+                                ;;
+                        esac
+                    done
+                elif [[ "$command" == "impair-scenario" ]]; then
+                    # impair-scenario <name> [node|all]
+                    if [[ -z "$SPECIFIC_NODE" ]]; then
+                        SPECIFIC_NODE="$1"  # scenario name
+                        shift
+                    fi
+                    if [[ $# -gt 0 ]] && [[ ! "$1" =~ ^- ]]; then
+                        IMPAIR_DELAY="$1"  # reuse as target node
+                        shift
+                    fi
                 else
                     log_error "Unknown option: $1"
                     exit 1
@@ -1794,6 +1921,92 @@ parse_args() {
         heal)
             heal_partition "$SPECIFIC_NODE"
             ;;
+        delay)
+            source "$SCRIPT_DIR/lib/network-impairment.sh"
+            check_netem_prerequisites
+            if [[ -z "$SPECIFIC_NODE" ]]; then
+                log_error "Node ID or 'all' required for delay command"
+                exit 1
+            fi
+            if [[ -z "$IMPAIR_DELAY" ]]; then
+                log_error "Delay value required (e.g., 100ms) or 'reset'"
+                exit 1
+            fi
+            if [[ "$IMPAIR_DELAY" == "reset" ]]; then
+                reset_impairment "$SPECIFIC_NODE"
+            else
+                apply_delay "$SPECIFIC_NODE" "$IMPAIR_DELAY" "$IMPAIR_JITTER"
+            fi
+            ;;
+        loss)
+            source "$SCRIPT_DIR/lib/network-impairment.sh"
+            check_netem_prerequisites
+            if [[ -z "$SPECIFIC_NODE" ]]; then
+                log_error "Node ID or 'all' required for loss command"
+                exit 1
+            fi
+            if [[ -z "$IMPAIR_LOSS" ]]; then
+                log_error "Loss percentage required (e.g., 5%) or 'reset'"
+                exit 1
+            fi
+            if [[ "$IMPAIR_LOSS" == "reset" ]]; then
+                reset_impairment "$SPECIFIC_NODE"
+            else
+                apply_loss "$SPECIFIC_NODE" "$IMPAIR_LOSS" "$IMPAIR_CORRUPT"
+            fi
+            ;;
+        impair)
+            source "$SCRIPT_DIR/lib/network-impairment.sh"
+            check_netem_prerequisites
+            if [[ -z "$SPECIFIC_NODE" ]]; then
+                log_error "Node ID or 'all' required for impair command"
+                exit 1
+            fi
+            if [[ "$IMPAIR_DELAY" == "reset" ]]; then
+                reset_impairment "$SPECIFIC_NODE"
+            else
+                # Build netem parameter string from individual options
+                local netem_params=""
+                if [[ -n "$IMPAIR_DELAY" ]]; then
+                    netem_params="delay $IMPAIR_DELAY"
+                    if [[ -n "$IMPAIR_JITTER" ]]; then
+                        netem_params="$netem_params $IMPAIR_JITTER"
+                    fi
+                fi
+                if [[ -n "$IMPAIR_LOSS" ]]; then
+                    netem_params="$netem_params loss $IMPAIR_LOSS"
+                fi
+                if [[ -n "$IMPAIR_CORRUPT" ]]; then
+                    netem_params="$netem_params corrupt $IMPAIR_CORRUPT"
+                fi
+                if [[ -n "$IMPAIR_DUPLICATE" ]]; then
+                    netem_params="$netem_params duplicate $IMPAIR_DUPLICATE"
+                fi
+                if [[ -n "$IMPAIR_REORDER" ]]; then
+                    netem_params="$netem_params reorder $IMPAIR_REORDER"
+                fi
+                if [[ -z "$netem_params" ]]; then
+                    log_error "At least one impairment option required (--delay, --loss, --corrupt, etc.) or 'reset'"
+                    exit 1
+                fi
+                apply_combined_impairment "$SPECIFIC_NODE" $netem_params
+            fi
+            ;;
+        impair-status)
+            source "$SCRIPT_DIR/lib/network-impairment.sh"
+            show_impairment_status
+            ;;
+        impair-scenario)
+            source "$SCRIPT_DIR/lib/network-impairment.sh"
+            check_netem_prerequisites
+            if [[ -z "$SPECIFIC_NODE" ]]; then
+                log_error "Scenario name required (lan, wan, satellite, flaky, congested, lossy)"
+                exit 1
+            fi
+            local scenario_name="$SPECIFIC_NODE"
+            local scenario_target="${IMPAIR_DELAY:-all}"  # target stored in IMPAIR_DELAY
+            apply_scenario "$scenario_name" "$scenario_target"
+            ;;
         configure)
             run_configure_wizard
             ;;
@@ -1854,6 +2067,10 @@ show_status() {
     
     echo ""
     show_partition_status
+    
+    echo ""
+    source "$SCRIPT_DIR/lib/network-impairment.sh"
+    show_impairment_status
 }
 
 # Enter namespace shell

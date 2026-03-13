@@ -127,7 +127,7 @@ check_basic_prerequisites() {
     log_info "Checking basic prerequisites..."
     
     local missing_commands=()
-    local required_commands=("ip" "sudo" "mkdir" "rm" "ln")
+    local required_commands=("ip" "sudo" "mkdir" "rm" "ln" "tc")
     
     for cmd in "${required_commands[@]}"; do
         if ! command_exists "$cmd"; then
@@ -144,6 +144,9 @@ check_basic_prerequisites() {
             case "$cmd" in
                 ip)
                     log_error "  ip: sudo apt-get install iproute2  (or: sudo yum install iproute)"
+                    ;;
+                tc)
+                    log_error "  tc: sudo apt-get install iproute2  (or: sudo yum install iproute)"
                     ;;
                 sudo)
                     log_error "  sudo: Please install sudo and add your user to the sudo group"
