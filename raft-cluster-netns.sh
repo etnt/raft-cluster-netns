@@ -711,10 +711,11 @@ show_partition_status() {
                     target_ip="${NETWORK_PREFIX}.${j}.1"
                 fi
                 
+                # Use %10s to compensate for UTF-8 multi-byte chars (3 bytes, 1 display col)
                 if sudo ip netns exec "$netns_i" ping -c 1 -W 1 "$target_ip" >/dev/null 2>&1; then
-                    printf "%8s" "✓"
+                    printf "%10s" "✓"
                 else
-                    printf "%8s" "✗"
+                    printf "%10s" "✗"
                 fi
             fi
         done

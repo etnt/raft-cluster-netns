@@ -1,0 +1,10 @@
+<ncs-package xmlns="http://tail-f.com/ns/ncs-packages">
+  <name>foo</name>
+  <package-version>1.0</package-version>
+  <description>Template-based foo resource facing service</description>
+  <ncs-min-version>6.7</ncs-min-version>
+
+  <!-- THIS IS A VERY SIMPLE SERVICE PACKAGE,       -->
+  <!-- TO BE USED FOR CREATING LOAD IN A HA CLUSTER -->
+
+</ncs-package>

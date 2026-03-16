@@ -20,8 +20,8 @@
 #
 # Prerequisites:
 #   - A 7-node cluster must already be set up and running:
-#       ./raft-cluster-netns.sh setup -n 7
-#       ./raft-cluster-netns.sh start
+#       ./raft-cluster-netns.sh configure -n 7
+#       ./raft-cluster-netns.sh setup
 #
 # Usage:
 #   ./misc/geo-located-7-nodes-cluster.sh              # apply impairments
@@ -30,6 +30,17 @@
 # To clear all impairments afterwards:
 #   ./raft-cluster-netns.sh impair all reset
 #
+
+if [[ ! -d "work_dir" ]]; then
+    echo "Error: 'work_dir' directory not found. Please run from the project root." >&2
+    exit 1
+fi
+
+source ./.raft-cluster.conf
+if [[ "$nodes" -ne 7 ]]; then
+    echo "Error: This script requires a 7-node cluster, but nodes=$nodes." >&2
+    exit 1
+fi
 
 DRY_RUN=""
 if [[ "$1" == "--dry-run" ]]; then

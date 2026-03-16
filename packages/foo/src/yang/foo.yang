@@ -1,0 +1,27 @@
+module foo {
+  namespace "http://com/example/foo";
+  prefix foo;
+
+  import ietf-inet-types {
+    prefix inet;
+  }
+  import tailf-ncs {
+    prefix ncs;
+  }
+
+  list foo {
+    key name;
+
+    uses ncs:service-data;
+    ncs:servicepoint "foo";
+
+    leaf name {
+      type string;
+    }
+
+    leaf num {
+      type int32;
+    }
+
+  }
+}

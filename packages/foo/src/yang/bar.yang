@@ -1,0 +1,26 @@
+module bar {
+  namespace "http://com/example/bar";
+  prefix bar;
+
+
+  list bar {
+    key name;
+
+    leaf name {
+      type string;
+    }
+
+    list tomato {
+         key name;
+
+         leaf name {
+              type string;
+        }
+         leaf description {
+              type string;
+        }
+
+    }
+
+  }
+}

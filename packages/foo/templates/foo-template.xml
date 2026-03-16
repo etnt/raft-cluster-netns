@@ -1,0 +1,21 @@
+<config-template xmlns="http://tail-f.com/ns/config/1.0"
+                 servicepoint="foo">
+  <bar xmlns="http://com/example/bar">
+      <name>{/name}</name>
+
+      <?for i=0; {$i < /num}; i={$i + 1}?>
+      <tomato>
+        <name>{$i}</name>
+        <description>
+          The tomato is a plant whose fruit is an edible berry that is eaten
+          as a vegetable. The tomato is a member of the nightshade family
+          that includes tobacco, potato, and chili peppers. It originated
+          from western South America, and may have been domesticated there,
+          in Mexico, or in Central America. The Spanish introduced tomatoes
+          to Eurasia in the Columbian exchange in the 16th century.
+        </description>
+      </tomato>
+      <?end?>
+
+  </bar>
+</config-template>
